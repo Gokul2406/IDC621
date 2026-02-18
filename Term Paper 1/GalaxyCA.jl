@@ -56,6 +56,9 @@ The work done by [^Gerola_Seiden1978] uses a different approach to this. Instead
 
 !!! info "Stochastic Self Propagating Star Formation"
 	This model proposes that star formation propagates via the action of shock waves produced by stellar winds and supernovae traversing the gas that composes the interstellar medium. [Wikipedia](https://en.wikipedia.org/wiki/SSPSF_model)
+
+!!! important "Model Presented In Paper"
+	The model consists of a 3-state stochastic cellular automaton on a polar grid with deterministic decay and probabilistic excitation rules.
 """
 
 # ╔═╡ 2f137fe9-9b74-41e0-871c-ca9c6b2a3019
@@ -214,7 +217,7 @@ md"""
 # ╔═╡ 84b9a207-abcd-418a-a08c-7cd4bb925ce9
 md"""
 ### Helper Functions For Updating Cell State
-The function ```set_cell``` is used for updating the cell using new values while the function ```get_cell``` is used for retreiving the current cell information.
+The function ```set_cell``` is used for updating the cell using new values while the function ```get_cell``` is used for retrieving the current cell information.
 """
 
 # ╔═╡ d1c9f63f-d4a0-462d-a5f8-bf0e4ff41730
@@ -392,17 +395,17 @@ md"""
 This function is defined for performing the time evolution of the model. The function has the following parameters
 
 1. ```grid```:- The galaxy grid
-2. ``P_{st}``: Probability of creating another star
+2. ``P_{st}``: Probability of inducing star formation in neighbours
 3. ``P_{sp}``: Probability of spontaneous creation of stars
 4. ```τᵣ```: The refractory time
 
-At every timestep we check each of the cells of the grid. If the cell is currently starforming then in the next step it is set to be refractory. Refractory in our model represents a region of the galaxy that has recently undergone star formation and is currently restircted from forming new stars. 
+At every timestep we check each of the cells of the grid. If the cell is currently starforming, then in the next step it is set to be refractory. Refractory in our model represents a region of the galaxy that has recently undergone star formation and is currently restricted from forming new stars. 
 
 In our model, we have defined a refractory time τᵣ. This is the number of timesteps till which a cell must stay in its refractory state. So if a cell is refractory in the current timestep, we check its age. If the age of the cell is more than τᵣ, then we update the cell to be Quiescent, else we keep it in the refractory state.
 
 Then we move on to the next step which is focused on creating star forming regions which is where we've added stochasticity. 
 
-If after the first steps, the new state is Quiescent, then we check if the state has any star forming neighbours. If the cell has any starforming cell as its neighbour, then based on the the probability of stochastic star formation ($P_{st}$) we set the cell to be StarForming. In the other case that the cell doesn't have any star forming neighbour, then based on the probability of spontaneous star formation ($P_{sp}$) we set it to be StarForming. 
+If after the first step, the new state is Quiescent, then we check if the state has any star forming neighbours. If the cell has any starforming cell as its neighbour, then based on the the probability of stochastic star formation ($P_{st}$) we set the cell to be StarForming. In the other case that the cell doesn't have any star forming neighbour, then based on the probability of spontaneous star formation ($P_{sp}$) we set it to be StarForming. 
 
 The updation rule we use for our model is described below. For each cell in the grid we check the present state
 
@@ -427,7 +430,7 @@ $S_{i}(t) = 1$
 then 
 
 $S_{i}(t+1) = 2$ 
-$a_{i}(t+1) = a_{i}(t) + 1$
+$a_{i}(t+1) = 1$
 
 If Refractory
 
@@ -617,10 +620,10 @@ Animations are better than images. Hence to give a good picture of the evolution
 
 1. ```grid```: The galaxy grid.
 2. ```steps```: The time till which the animation is required.
-3. ``P_{st}```: Probability of creating another star.
+3. ``P_{st}```: Probability of inducing star formation in neighbours.
 4. ``P_{sp}``: Probability of spontaneous creation of stars.
 5. ```τᵣ```: Refractory time.
-6. ```dt```: Timestep
+6. ```dt```: Timestep for rotation
 7. ```rotation_curve```: The rotation curve of the galaxy
 """
 
@@ -630,7 +633,7 @@ md"""
 After every timestep the galaxy should rotate by an angle. To perform that action we have this function here. The parameters for this function are 
 
 1. ```grid```: The galaxy grid
-2. ```dt```: Time step
+2. ```dt```: Time step for rotation
 3. ```rotation_curve```: The rotation curve of the galaxy
 """
 
@@ -705,7 +708,7 @@ md"""
 
 # ╔═╡ 8a385bf1-4de9-46bb-a333-af16f07f19b1
 function count_states(grid::DiskGrid)
-
+	
     n_quiescent = 0
     n_starforming = 0
     n_refractory = 0
@@ -749,8 +752,8 @@ This function essentially acts like a wrapper around most of the above functions
 1. ```num_rings```: Number of rings in the galaxy
 2. ```r_inner```: Inner radius of the galactic disk
 3. ```r_outer```: Outer radius of the galactic disk
-4. ```Pₛₚ```: Probability of inducing star formation
-5. ```pₛₜ```: Probability of spontaneous creation of stars
+4. ```Pₛₚ```: Probability of spontaneous star formation
+5. ```pₛₜ```: Probability of inducing stars formation in neighbours
 6. ```τᵣ```: Refractory time
 7. ```rotation_curve```: The rotation curve of the galaxy 
 8. ```dt```: Time interval for animation
@@ -778,7 +781,7 @@ function simulate(;
 
     grid = create_disk_grid(num_rings, r_inner, r_outer, num_inner_cells)
 
-    # Initial seeding
+    # Initial seeding. We fill 1% of total cells with star forming cells
     for r in 1:grid.num_rings
         for cell in grid.cells[r]
             if rand() < 0.01
@@ -848,7 +851,7 @@ end
 # ╔═╡ 93fa9970-d199-42b9-9934-4a2000d5a8e6
 md"""
 # Playing Around With The Model
-Throughout this next section, I shall be exploring various phenomenons produced by the model for varying parameters. For doing this the functions defined previously shall be used.
+Throughout this next section, I shall be exploring various phenomenona produced by the model for varying parameters. For doing this the functions defined previously shall be used.
 """
 
 # ╔═╡ c8a6dd97-626b-43f8-9a60-36010278943d
@@ -869,7 +872,7 @@ plot_fraction_evolution(qf_low_N, sff_low_N, rf_low_N)
 
 # ╔═╡ 1efffbde-5bbf-407a-bbbb-a03ca23f4687
 md"""
-## Goldilocke Parameters (?)
+## Goldilocks Parameters (?)
 These are a set of values i found for wchich we can clearly see spiral structures emerging. The parameters are listed below
 1. ``P_{st} = 0.25``
 2. ``P_{sp} = 0.005``
@@ -882,7 +885,7 @@ One can think of $P_{sp}$ as the probability of seeding activity and $P_{st}$ as
 
 # ╔═╡ 608bd869-8a48-4adb-a8d2-2f5f62d7c031
 begin
-	anim_goldi, qf_goldi, sff_goldi, rf_goldi = simulate(n_steps=300, fps=10, Psp=0.005, Pst=0.25, r_inner=8.0, r_outer=60.0, num_inner_cells=50, τr=16)
+	anim_goldi, qf_goldi, sff_goldi, rf_goldi = simulate(n_steps=300, fps=10, Psp=0.005, Pst=0.2, r_inner=8.0, r_outer=60.0, num_inner_cells=50, τr=16)
 	anim_goldi
 end
 
@@ -892,23 +895,39 @@ plot_fraction_evolution(qf_goldi, sff_goldi, rf_goldi)
 # ╔═╡ ab8aa082-ab4d-4b11-8877-f08c23617ac6
 md"""
 ## Low ``P_{st}``
-In this, we set the probability of propagation of activity to be very low (0.05). While we can see very faint spiral arms, most part of the galaxy remains Quiescent as is expected. This goes on to show how when the propagation of star formation activity (in the theory of stochastic self propagating star formation, this is attributed to supernovae) is low, the star forming regions are very limited and only faint spiral arms are visible.  
+In this, we set the probability of propagation of activity to be very low (0.05). While we can see very faint spiral arms, most part of the galaxy remains Quiescent as is expected. This goes on to show how when the propagation of star formation activity (in the theory of stochastic self propagating star formation, this is attributed to supernovae) is low, the star forming regions are very limited and only faint spiral arms are visible. Using these parameters, although the number of refractory or star forming cells are quite low compared to the cells in the quiescent state, one can easily identify the spiral arm structures.
 """
 
 # ╔═╡ db358845-5baa-43d8-8048-d6e1f1df95de
 begin
-	anim_low_Pst, qf_low_Pst, sff_low_Pst, rf_low_Pst = simulate(n_steps=300, fps=15, Psp=0.001, Pst=0.05, r_inner=8.0,r_outer=80.0)
+	anim_low_Pst, qf_low_Pst, sff_low_Pst, rf_low_Pst = simulate(n_steps=300, fps=15, Psp=0.005, Pst=0.005, r_inner=8.0,r_outer=80.0, num_inner_cells=50, τr=16)
 	anim_low_Pst
 end
 
 # ╔═╡ 0670ab1f-9848-4943-b4f1-a6938972900d
 plot_fraction_evolution(qf_low_Pst, sff_low_Pst, rf_low_Pst)
 
+# ╔═╡ 5f0190c9-ae8a-4a99-9adc-78583380a95f
+md"""
+## High $P_{st}$
+
+In this, we set a high value for the probability of propagation of activity and observe what happens to the galaxy. When we set $P_{st}$ = 0.5, we can see that almost entirety of the disk becomes refractory within a short amount of time and that the galaxy starts performing an oscillatory behaviour with respect to the number of cells in refractory and quiescent states. The reason why this happens shows the propagation effect. Initially a few cells are star forming and due to the high value of $P_{st}$, it is able to induce star formation in its neighbouring quiescent cells, which in turn induces star formation in other cells. Our rule is such that once the cell is in star formation state, in the next timestep it enters the refractory regime. Due to this, we are able to see nearly the entire cells become refractory. After the refractory time, all the cells that are refractory return back to quiescent state and the process repeats. This is what leads to the oscillatory behaviour.
+"""
+
+# ╔═╡ 50391b28-478e-470e-b56e-fac9c42b87b4
+begin
+	anim_high_Pst, qf_high_Pst, sff_high_Pst, rf_high_Pst = simulate(n_steps=300, fps=15, Psp=0.005, Pst=0.5, r_inner=8.0,r_outer=80.0, num_inner_cells=50, τr=16)
+	anim_high_Pst
+end
+
+# ╔═╡ bd93eb62-5a24-4333-b648-ac86bb87284d
+plot_fraction_evolution(qf_high_Pst, sff_high_Pst, rf_high_Pst)
+
 # ╔═╡ 03a94abc-15e1-41ee-a2cd-897f86a76f1b
 md"""
 # Observations
 
-Through various runs of the model on different parameter values, it has been presented that local processes can give rise to spiral arm like sturcutres in a galaxy which is the claim by of Stochastic Self Propagating Star Formation. We see that the system reaches a stable state of star forming, quiescent and refractory. By using the correct value for various parameters one is able to obtain persistent spiral arm structures in galaxies. 
+Through various runs of the model on different parameter values, it has been presented that local processes can give rise to spiral arm like structures in a galaxy which is the claim by of Stochastic Self Propagating Star Formation. We see that the system reaches a stable state of star forming, quiescent and refractory. By using the correct value for various parameters one is able to obtain persistent spiral arm structures in galaxies. 
 
 """
 
@@ -917,7 +936,7 @@ md"""
 # Future Work
 1. The model presented here is a very simplistic model that doesn't take into account the physical dimensions. In the future I wish to expand this model by using physical dimensions for the timestep and cell sizes.
 
-2. Currently we are using a hard refractory rule, instead of this, it would be better to try out the model for another rule that is more physical.
+2. Currently we are using a hard refractory rule which updates the state from refractory to quiescent based on age. Instead of this, it would be intersteing to try out the model for another rule that is more physical.
 
 3. Application of this model for real galaxies using their rotation curves.
 """
@@ -2134,6 +2153,9 @@ version = "1.13.0+0"
 # ╟─ab8aa082-ab4d-4b11-8877-f08c23617ac6
 # ╠═db358845-5baa-43d8-8048-d6e1f1df95de
 # ╠═0670ab1f-9848-4943-b4f1-a6938972900d
+# ╟─5f0190c9-ae8a-4a99-9adc-78583380a95f
+# ╠═50391b28-478e-470e-b56e-fac9c42b87b4
+# ╠═bd93eb62-5a24-4333-b648-ac86bb87284d
 # ╟─03a94abc-15e1-41ee-a2cd-897f86a76f1b
 # ╟─99963174-27c0-4854-886d-67ed724a1578
 # ╟─5155a194-5678-425c-8f43-440b3ac7af81
