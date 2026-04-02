@@ -41,7 +41,7 @@ md"""
 
 The equation used for the CML is 
 
-$\theta_{n+1}(i) = {(1 - \epsilon)f(\theta_n(i)) + \frac{\epsilon}{2}[f(\theta_n(i+1)) + f(\theta_n(i - 1))]} \pmod{1}$
+$\theta_{n+1}(i) = [{(1 - \epsilon)f(\theta_n(i)) + \frac{\epsilon}{2}[f(\theta_n(i+1)) + f(\theta_n(i - 1))]}] \pmod{1}$
 
 where 
 
@@ -64,13 +64,10 @@ function cml_step(x, r, ϵ, f)
         left  = mod1(i - 1, N)
         right = mod1(i + 1, N)
         
-        new_x[i] = (1 - ϵ) * fx[i] + (ϵ / 2) * (fx[left] + fx[right]) % 1
+        new_x[i] = ((1 - ϵ) * fx[i] + (ϵ / 2) * (fx[left] + fx[right])) % 1
     end
     return new_x
 end
-
-# ╔═╡ 91da9ab2-780e-48b3-b23b-7d0f6c1f7d15
-
 
 # ╔═╡ bd28a164-f175-4ecc-bf99-288b1f8e1e1e
 md"""The given function implemented in code"""
@@ -122,29 +119,15 @@ end
 
 # ╔═╡ 362064d3-09b6-4524-8a92-86f0665beaf1
 md"""
-## Spatial Synchronization
-The horizontal bands indicate spatial synchronization
+## Brownian motion of defect
 """
 
 # ╔═╡ b27e096f-f76e-41bb-8fb9-68a9e4d535f0
 begin
-	Ω_1 = 0.16
-	ϵ_1 = 0.1
-	func_results = evolve(500, Ω_1, ϵ_1, func, 100)
+	Ω_1 = 0.31
+	ϵ_1 = 0.28
+	func_results = evolve(100, Ω_1, ϵ_1, func, 100)
 	heatmap(func_results, xlabel="Lattice site", ylabel="Time", title="Omega = $Ω_1 Epsilon = $ϵ_1", c = :deep, size=(800, 600))
-end
-
-# ╔═╡ 8a1df7d6-34f4-4b0a-95d4-af55ae3b812c
-md"""
-The synchronized state is being broken in this case. The system is starting to be chaotic
-"""
-
-# ╔═╡ ef38af85-8fea-415e-a719-1d97f077a439
-begin
-	Ω_2 = 0.161
-	ϵ_2 = 0.1
-	func_results_2 = evolve(500, Ω_2, ϵ_2, func, 100)
-	heatmap(func_results_2, xlabel="Lattice site", ylabel="Time", title="Omega = $Ω_2 Epsilon = $ϵ_2", c = :deep, size=(800, 600))
 end
 
 # ╔═╡ a9a2b29e-fd1c-4ab8-a56c-67b59ce5542b
@@ -155,25 +138,10 @@ The vertical lines creates patterns with a reduce in chaos
 
 # ╔═╡ e506e712-ea9b-45c1-a7fe-731bbf6c75ce
 begin
-	Ω_3 = 0.6
-	ϵ_3 = 0.1009
+	Ω_3 = 0.35
+	ϵ_3 = 0.23
 	func_results_3 = evolve(500, Ω_3, ϵ_3, func, 100)
 	heatmap(func_results_3, xlabel="Lattice site", ylabel="Time", title="Omega = $Ω_3 Epsilon = $ϵ_3", c = :deep, size=(800, 600))
-end
-
-# ╔═╡ 37f3a528-4455-4900-a0dd-6b865fec62c3
-md"""
-## Chimera 
-
-For these values of parameters, we can see a chimera state. Majorly the system is at a value close to 1 with multiple vertical bands which have values closer to 0 and < 0.5
-"""
-
-# ╔═╡ 4aee543d-94c7-4bcf-9dc8-784b75143baf
-begin
-	Ω_7 = 0.1
-	ϵ_7 = 0.1
-	func_results_7 = evolve(500, Ω_7, ϵ_7, func, 100)
-	heatmap(func_results_7, xlabel="Lattice site", ylabel="Time", title="Omega = $Ω_7 Epsilon = $ϵ_7", c = :deep, size=(800, 600))
 end
 
 # ╔═╡ 43a9c0e1-8414-419c-bb26-ee6d20657b8b
@@ -183,9 +151,9 @@ md"""
 
 # ╔═╡ e0d24b2b-b1e0-4800-9813-5263563536e2
 begin
-	Ω_11 = 0.625
-	ϵ_11 = 0.3114 
-	func_results_11 = evolve(500, Ω_11, ϵ_11, func, 100)
+	Ω_11 = 0.35
+	ϵ_11 = 0.2 
+	func_results_11 = evolve(100, Ω_11, ϵ_11, func, 100)
 	heatmap(func_results_11, xlabel="Lattice site", ylabel="Time", title="Omega = $Ω_11 Epsilon = $ϵ_11", c = :deep, size=(800, 600))
 end
 
@@ -196,78 +164,69 @@ md"""
 
 # ╔═╡ e9510c3d-39b8-422d-8bd5-c3ce9b65fc48
 begin
-	Ω_13 = 0.2801
-	ϵ_13 = 0.45 
-	func_results_13 = evolve(1000, Ω_13, ϵ_13, func, 100)
+	Ω_13 = 0.52
+	ϵ_13 = 0.630001
+	func_results_13 = evolve(500, Ω_13, ϵ_13, func, 100)
 	heatmap(func_results_13, xlabel="Lattice site", ylabel="Time", title="Omega = $Ω_13 Epsilon = $ϵ_13", c = :deep, size=(800, 600))
 end
 
 # ╔═╡ 88c148fa-bd2f-49d6-9d3e-23374b245883
 md"""
 ## Unclassified
+These are CML patterns that I couldn't classify
 """
 
-# ╔═╡ 24a0de5d-0b8e-43d6-90f1-716d326fe710
+# ╔═╡ 4aee543d-94c7-4bcf-9dc8-784b75143baf
+begin
+	Ω_7 = 0.34
+	ϵ_7 = 0.97
+	func_results_7 = evolve(100, Ω_7, ϵ_7, func, 100)
+	heatmap(func_results_7, xlabel="Lattice site", ylabel="Time", title="Omega = $Ω_7 Epsilon = $ϵ_7", c = :deep, size=(800, 600))
+end
+
+# ╔═╡ 61f5ea22-b36f-4373-87d0-eb0dc9bafc3b
 md"""
-### Defects dying out ?
-The map is largely homogeneous, with some defects that seem to die out as the system evolves
+A sinusoidal like shape is being taken as t approaches 100
 """
 
 # ╔═╡ 02979ec4-a945-4cae-913a-62eb1df13475
 begin
-	Ω_6 = 0.9
-	ϵ_6 = 0.8006
+	Ω_6 = 0.3982
+	ϵ_6 = 0.1
 	func_results_6 = evolve(100, Ω_6, ϵ_6, func, 100)
 	heatmap(func_results_6, xlabel="Lattice site", ylabel="Time", title="Omega = $Ω_6 Epsilon = $ϵ_6", c = :deep, size=(800, 600))
 end
 
-# ╔═╡ 3bb8d824-f913-4f96-b4af-9fbf0357bc9d
+# ╔═╡ e42feaef-363f-4ae0-bbed-0be36f3caa00
 md"""
-### Pattern Formation At Late Time ?
-This one seems to have a pattern that emerges after around t = 400
-
+A forest of triangles 
 """
 
-# ╔═╡ 4c1abd2a-892a-4c0e-9445-4b88904d0a75
+# ╔═╡ 81372442-b265-41fe-b0cb-ff5e2098274b
 begin
-	Ω_10 = 0.42 
-	ϵ_10 = 0.72 
-	func_results_10 = evolve(1500, Ω_10, ϵ_10, func, 100)
+	Ω_10 = 0.82
+	ϵ_10 = 0.84
+	func_results_10 = evolve(100, Ω_10, ϵ_10, func, 100)
 	heatmap(func_results_10, xlabel="Lattice site", ylabel="Time", title="Omega = $Ω_10 Epsilon = $ϵ_10", c = :deep, size=(800, 600))
 end
 
-# ╔═╡ 81e45852-5b2a-4557-87b8-5158054f3c17
+# ╔═╡ 7bd3a27b-74b4-4b99-9b95-ae30eaa6ddcb
 md"""
-### Zero Idea
-I have no idea what to classify this as.
+Unsure what to classify this as
 """
 
-# ╔═╡ 14696185-3c8e-4a33-a914-e5709a833e0f
+# ╔═╡ 8470b096-a041-4071-b68f-b7330344731f
 begin
-	Ω_12 = 0.24
-	ϵ_12 = 0.72 
-	func_results_12 = evolve(500, Ω_12, ϵ_12, func, 100)
-	heatmap(func_results_12, xlabel="Lattice site", ylabel="Time", title="Omega = $Ω_12 Epsilon = $ϵ_12", c = :deep, size=(800, 600))
-end
-
-# ╔═╡ 134e2d85-8df6-42c3-b468-2a1a41b9d098
-md"""
-### Travelling Wave (?)
-This has a bit of a travelling wave feature to it, although the map is largely dominated by the horizontal lines, so I am a bit unsure whether this would completely fall under the travelling wave category
-"""
-
-# ╔═╡ 7158bd4e-463b-4662-a29b-cd1502fb8d2b
-begin
-	Ω_5 = 0.35
-	ϵ_5 = 0.76
-	func_results_5 = evolve(1500, Ω_5, ϵ_5, func, 100)
-	heatmap(func_results_5, xlabel="Lattice site", ylabel="Time", title="Omega = $Ω_5 Epsilon = $ϵ_5", c = :deep, size=(800, 600))
+	Ω_20 = 0.5291
+	ϵ_20 = 0.9371
+	func_results_20 = evolve(100, Ω_20, ϵ_20, func, 100)
+	heatmap(func_results_20, xlabel="Lattice site", ylabel="Time", title="Omega = $Ω_20 Epsilon = $ϵ_20", c = :deep, size=(800, 600))
 end
 
 # ╔═╡ 11d478bb-fc80-43ad-8ba1-391bc52768bb
 md"""
 # Varying K
-In this, I have set K = 2 and ran the code for the unclassified case with the defects dying out parameters. 
+In this, I have set K = 2
 """
 
 # ╔═╡ 8302b561-8466-49ef-a20a-ec17f674302e
@@ -280,7 +239,7 @@ md"""
 
 # ╔═╡ ac7bea71-d5a9-491d-a69b-197bedf0188e
 md"""
-The defects die out faster than K = 1 case.
+Shows a spatiotemporal intermittancy
 """
 
 # ╔═╡ f2a74e5f-3e73-4725-8e70-af89e138a0df
@@ -1481,7 +1440,6 @@ version = "1.13.0+0"
 # ╟─28375b25-c3db-4849-8d18-b9f69c519739
 # ╟─64832a61-02fa-427c-9ec4-9b3a24029412
 # ╠═2dd805ef-2fd3-4731-8a4f-43d64ae913fc
-# ╠═91da9ab2-780e-48b3-b23b-7d0f6c1f7d15
 # ╠═bd28a164-f175-4ecc-bf99-288b1f8e1e1e
 # ╠═5aaefc54-2fef-45d4-b993-b358bce84f80
 # ╟─6be8e3c3-7dc5-4f26-be86-745cc20569f6
@@ -1491,25 +1449,20 @@ version = "1.13.0+0"
 # ╠═84980845-dde3-4947-b04c-630ca7ec49b5
 # ╟─362064d3-09b6-4524-8a92-86f0665beaf1
 # ╠═b27e096f-f76e-41bb-8fb9-68a9e4d535f0
-# ╟─8a1df7d6-34f4-4b0a-95d4-af55ae3b812c
-# ╠═ef38af85-8fea-415e-a719-1d97f077a439
 # ╟─a9a2b29e-fd1c-4ab8-a56c-67b59ce5542b
 # ╠═e506e712-ea9b-45c1-a7fe-731bbf6c75ce
-# ╟─37f3a528-4455-4900-a0dd-6b865fec62c3
-# ╠═4aee543d-94c7-4bcf-9dc8-784b75143baf
 # ╟─43a9c0e1-8414-419c-bb26-ee6d20657b8b
 # ╠═e0d24b2b-b1e0-4800-9813-5263563536e2
 # ╟─bf904434-ebe3-4090-9b0e-2b109b65a88e
 # ╠═e9510c3d-39b8-422d-8bd5-c3ce9b65fc48
 # ╟─88c148fa-bd2f-49d6-9d3e-23374b245883
-# ╟─24a0de5d-0b8e-43d6-90f1-716d326fe710
+# ╠═4aee543d-94c7-4bcf-9dc8-784b75143baf
+# ╟─61f5ea22-b36f-4373-87d0-eb0dc9bafc3b
 # ╠═02979ec4-a945-4cae-913a-62eb1df13475
-# ╠═3bb8d824-f913-4f96-b4af-9fbf0357bc9d
-# ╠═4c1abd2a-892a-4c0e-9445-4b88904d0a75
-# ╟─81e45852-5b2a-4557-87b8-5158054f3c17
-# ╠═14696185-3c8e-4a33-a914-e5709a833e0f
-# ╟─134e2d85-8df6-42c3-b468-2a1a41b9d098
-# ╠═7158bd4e-463b-4662-a29b-cd1502fb8d2b
+# ╟─e42feaef-363f-4ae0-bbed-0be36f3caa00
+# ╠═81372442-b265-41fe-b0cb-ff5e2098274b
+# ╟─7bd3a27b-74b4-4b99-9b95-ae30eaa6ddcb
+# ╠═8470b096-a041-4071-b68f-b7330344731f
 # ╟─11d478bb-fc80-43ad-8ba1-391bc52768bb
 # ╠═8302b561-8466-49ef-a20a-ec17f674302e
 # ╟─8037917e-f625-44b5-988c-d7586022ca30
