@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.20.21
+# v0.20.24
 
 using Markdown
 using InteractiveUtils
@@ -253,6 +253,50 @@ function animate_phase_and_r(θ_vals, r_vals;
     return anim
 end
 
+# ╔═╡ 3edb0cd2-3376-4eec-817b-83c1f74b3921
+function r_vs_K_for_N(N, Ks; k=6, β=0.1)
+
+    g = watts_strogatz(N, k, β)
+
+    ω = rand(Normal(0,1), N)
+    θ0 = 2π * rand(N)
+
+    r_vals = Float64[]
+
+    for K in Ks
+        sol, r_t = run_simulation(g, ω, θ0, K)
+
+        # steady-state average
+        push!(r_vals, mean(r_t[end-20:end]))
+    end
+
+    return r_vals
+end
+
+# ╔═╡ c6382bad-41d1-4ba5-b653-971583c56b53
+
+function plot_r_time_vs_beta(N, β_values, K; k=6)
+
+    plot()
+
+    for β in β_values
+        g = watts_strogatz(N, k, β)
+
+        ω = rand(Normal(0,1), N)
+        θ0 = 2π * rand(N)
+
+        sol, r_t = run_simulation(g, ω, θ0, K)
+
+        plot!(sol.t, r_t,
+            lw=2,
+            label="β = $β")
+    end
+
+    xlabel!("t")
+    ylabel!("r(t)")
+    title!("Order parameter evolution (N = $N, K = $K)")
+end
+
 # ╔═╡ 063487b6-747d-4688-8c84-9a17d6a9c596
 md"""
 # Setup
@@ -456,7 +500,8 @@ end
 
 # ╔═╡ f8b4479e-cdd9-45a5-ab6a-6dea36e4e5c6
 begin
-r_vals_for_K = synchronization_curve(g, ω, θ0, Ks)
+	new_g = watts_strogatz(300, 6, 0.1)
+r_vals_for_K = synchronization_curve(new_g, ω, θ0, Ks)
 
 # --- compute Kc ---
 Kc_num = Kc_from_derivative(Ks, r_vals_for_K)
@@ -468,9 +513,50 @@ end
 
 # ╔═╡ e0a24e95-a0a5-4993-a2c5-30a9077d257e
 md"""
-We find that it is not very close. It could be due to the finite size effect due to which the value obtained from the simulation is not able to come close to the theoretical value. 
+We find that it is not very close. It could be due to the **finite size effect** due to which the value obtained from the simulation is not able to come close to the theoretical value. 
 
 """
+
+# ╔═╡ 88833dc1-e70f-40eb-bec5-309d81a97ca1
+md"""
+# Varying Network Size
+"""
+
+# ╔═╡ b1606892-7569-4e4c-9c4c-1e9587401226
+begin
+Ns = [100, 200, 400, 800]
+Ks_2 = range(0, 5, length=25)
+
+plot()
+
+for N in Ns
+    r_vals = r_vs_K_for_N(N, Ks_2)
+
+    plot!(Ks_2, r_vals,
+        lw=2,
+        label="N = $N")
+end
+
+xlabel!("K")
+ylabel!("r")
+title!("Synchronization vs K for different N")
+end
+
+# ╔═╡ b58300c1-8e3c-4217-8adc-fd3ed6507cb2
+md"""
+# Comparing Time-series of Order parameter for varying β
+
+We can see that here the order parameter doesn't reach 1 (synchronized state) when β = 0.0 and the synchronization is achieved much faster for larger values of β
+"""
+
+# ╔═╡ 1832ff35-186b-4479-9b47-8bbe96fb3bcf
+begin
+	N_2 = 300
+	β_values_2 = [0.0, 0.05, 0.1, 0.5]
+	K_2 = 2.0  
+	
+	plot_r_time_vs_beta(N_2, β_values_2, K_2)
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -3095,6 +3181,8 @@ version = "1.13.0+0"
 # ╠═05398da8-a726-497a-a8c5-9c0ca775bd6f
 # ╠═035bdefa-b9fc-4381-9749-c4c2541207fc
 # ╠═69fcd82f-4225-41a5-a83e-961db6f13334
+# ╠═3edb0cd2-3376-4eec-817b-83c1f74b3921
+# ╠═c6382bad-41d1-4ba5-b653-971583c56b53
 # ╟─063487b6-747d-4688-8c84-9a17d6a9c596
 # ╠═09d4230a-c271-4e8d-a3c5-74a2a2bb23f0
 # ╠═b254f756-2c3a-4ef3-8194-e80f8c0706d3
@@ -3123,5 +3211,9 @@ version = "1.13.0+0"
 # ╠═510ba6dc-4c14-4809-bdab-83050f71c353
 # ╠═f8b4479e-cdd9-45a5-ab6a-6dea36e4e5c6
 # ╟─e0a24e95-a0a5-4993-a2c5-30a9077d257e
+# ╟─88833dc1-e70f-40eb-bec5-309d81a97ca1
+# ╠═b1606892-7569-4e4c-9c4c-1e9587401226
+# ╟─b58300c1-8e3c-4217-8adc-fd3ed6507cb2
+# ╠═1832ff35-186b-4479-9b47-8bbe96fb3bcf
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
