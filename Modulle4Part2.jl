@@ -4,548 +4,759 @@
 using Markdown
 using InteractiveUtils
 
-# ╔═╡ 602d62ba-1ad4-11f1-b313-5335bcd6b34f
+# ╔═╡ 94b5cf44-3f29-11f1-bda5-6bfd93d05d3e
 begin
+	using Graphs
 	using Plots
+	using Karnak
 	using Statistics
-	using Distributions
-	using Random
-	using PlutoUI
-	using LsqFit
-	Random.seed!(1)
-
+	using StatsBase
+	using LinearAlgebra
+	using Printf
+	using FFTW
 end
 
-# ╔═╡ bcbc2212-ed6e-4f13-aaf9-ce590307f3e9
-html"""
-<h1 style="text-align:center;">Term Paper 2</h1>
-<h2 style="text-align:center;">Topic:- Kuramoto Model</h2>
-"""
-
-# ╔═╡ 73d949f1-e2bd-48bd-ac66-bf80826352e8
+# ╔═╡ 7de066f5-57e0-4460-b893-b6a77fc6b83a
 md"""
-This is the submission of Gokul P Bharathan (**MS23027**) towards module 2 for the course IDC621 Modelling Complex Systems. The paper is split into code blocks as well as explanations, done so as to give transparency to the observed results from the model.
+The local evolution of each node is governed by:
+
+$$x_{n+1} = x_n^2 e^{r - x_n}$$
+
+The spatiotemporal evolution of the coupled system is given by:
+
+$x_i(n+1) = (1 - \epsilon) f(x_i(n)) + \frac{\epsilon}{k_i} \sum_{j \in \mathcal{N}_i} f(x_j(n))$
+
+where:
+$f(x)$ is the local map defined above.
+
+$\epsilon \in [0, 1]$ is the coupling strength.
+
+$k_i$ is the degree of node $i$.
+
+$\mathcal{N}_i$ represents the set of nearest neighbors of node $i$.
+
 """
 
-# ╔═╡ dcbdb5fa-9339-420f-8a86-bb73c74ae150
+# ╔═╡ ae0a37e1-c6d8-4eb4-8aa5-2152091fa8c4
 md"""
-# Packages Used
-
-For making the paper, I have used Plots [^plots] for plotting, [^statistics] was used for statistical functions. Since I have used multiple distributions, [^distributions] was used. The paper is written in Pluto [^pluto] which gives reactive notebooks for julia [^julia].
+# Setup
 """
 
-# ╔═╡ ae67f298-ae74-45b7-b449-e56e4ae014fb
-TableOfContents(title="Term Paper 2, Kuramoto Model")
+# ╔═╡ a8cdace1-ea5d-4c89-bc77-b1739f2d3c3e
 
-# ╔═╡ 0d927fcb-8cbe-4d62-abdc-253c2f3366cc
-md"""
-# Kuramoto Model
-
-In this paper, I've implemented an all-to-all coupled Kuramoto model with sine function used for the interaction function.
-"""
-
-# ╔═╡ bc61842e-0a3e-4982-be34-9a5cf33ba7a4
-md"""
-## Brief Introduction About The Model
-Kuramoto model was formulated to understand the phenomenon of collective synchronization. In this phenomenon, oscillators with varying natural frequencies starts oscillating at the same frequency after some point. Notable examples include the flashing of fireflies [^fireflies], superconducting josephson junctions, networks of pacemaker cells in the heart and many many more. 
-
-The long term dynamics of a system of weakly coupled, nearly identical limit-cycle oscillators is given by 
-
-$$\dot{\theta}_i = \omega_i + \sum_{j=1}^{N} \Gamma_{ij} (\theta_j - \theta_i), \quad i = 1, \dots, N$$
-
-where $\Gamma_{ij}$ is the interaction functions.
-
-Kuramoto introduced the order parameter which is given by 
-
-$$re^{i\Psi} = \frac{1}{N}\sum_{j=1}^{N}e^{i\theta_j}$$
-
-Introduction of the order parameter simplified the dynamics massively. Instead of looking at all the $\theta_i$ individually, one can now study the order parameter to understand the dynamics of the population.
-
-## Kuramoto Dynamics With Order Parameter
-After introducing the order parameter, the previous equation get simplified into 
-
-$$\dot{\theta_i} = \omega_i + Kr\sin(\Psi - \theta_i) \quad i = 1, ..., N$$
-which is a much simpler equation to solve. Although each oscillator appears to be uncoupled from all others, they are still interacting through the mean-field quantities r and $\Psi$
-"""
-
-# ╔═╡ cdb53e74-a217-41a7-acf5-c9e6aba69c19
-function kuramoto(θ, ω, K, r, Ψ)
-	return ω .+ K*r*sin.(Ψ .- θ)
-end
-
-# ╔═╡ 8aec1137-49d9-4137-9215-ef7a26658433
-md"""
-# Initial Setup
-Here we define the number of oscillators, the simulation time, time step as well as the distribution from which we shall be sampling ω from. `save_interval` is used for animation purposes.
-
-"""
-
-# ╔═╡ dc736a21-ed78-45bc-bdd8-cc0bd1671683
 begin
-	N = 400
-	sim_time = 50000
-	time_step = 0.01
-	distribution = Normal(0, 1)
-	save_interval = 200
+
+	@inline f(x::Float64, r::Float64) = x^2 * exp(r - x)
+	@inline df(x::Float64, r::Float64) = x * (2.0 - x) * exp(r - x)
 end
 
-# ╔═╡ c1f138cf-d3a1-486b-ac63-42a9a7da591f
+# ╔═╡ fb4e35c1-411c-4491-91df-c09cfdca00ce
 md"""
-The values for $\omega_i$(Natural frequencies of oscillators) are sampled from a Gaussian distribution with a 0 mean and standard deviation of 1. ie 
-
-$$\omega_i \sim \mathcal{N}(0,1)$$  
-
-The phases $\theta_i$ are sampled from a uniform distribution 
-
-$$\theta_i \sim \mathrm{Uniform}(0,2\pi)$$
-
+## Finding Fixed Points
 """
 
-# ╔═╡ 5eec540d-75ec-4e41-88a6-b79553738234
+# ╔═╡ 1bb2c7e5-491b-4277-b264-3405f15aa028
+function fixed_points(r::Float64; x_range=(0.01, 6.0), n=10_000)
+    xs   = range(x_range[1], x_range[2]; length=n)
+    g(x) = f(x, r) - x            
+    fps  = Float64[]
+    for i in 1:(n-1)
+        if g(xs[i]) * g(xs[i+1]) < 0
+            a, b = xs[i], xs[i+1]
+            for _ in 1:50
+                m = (a+b)/2
+                g(a)*g(m) < 0 ? (b = m) : (a = m)
+            end
+            push!(fps, (a+b)/2)
+        end
+    end
+    return fps
+end
+
+
+# ╔═╡ b8ff25e4-3d88-4519-9372-f3ae4debe614
 begin
-	ω = rand(distribution, N)
-	θ_initial = rand(Uniform(0, 2π), N)
-	
-	ω_hist = histogram(ω;
-					   title="Distribution of ωᵢ"
-					  )
-	
-	θ_hist = histogram(θ_initial;
-					   title="Distribution of θ"
-					  )
-	
-	plot(ω_hist, θ_hist, layout=(1, 2), size=(700, 350))
+function stability(x_fp::Float64, r::Float64)
+    mu = abs(df(x_fp, r))
+    label = mu < 1 ? "stable" : (mu > 1 ? "unstable" : "neutral")
+    return mu, label
 end
 
-# ╔═╡ 6c7b889e-e334-4ac4-9e1e-567e61dd683e
-md"""
-## Calculating Order Parameter
-I have defined a function for computing $r$ and $\Psi$. It takes in a vector containing the phases of oscillators at the present time and returns r and $\Psi$.
-
-$$z = \frac{1}{N}\sum_{j=1}^{N}e^{i\theta_j}$$
-$$r = \left|z\right|$$
-$$\Psi = \arg(z)$$
-
-Here $r$ measures the degree of synchronization of the oscillators and $\Psi$ represents the mean phase of the population.
-"""
-
-# ╔═╡ 04e48ffc-645c-47e2-8a73-91a45ad18815
-function compute_r_Ψ(θ)
-	"""Computes r and psi using a vector of theta"""
-	z = mean(exp.(im.*θ))
-	return abs(z), angle(z) #r and psi
+function demo_fixed_points()
+    println("═"^60)
+    println("  Fixed-point analysis")
+    println("═"^60)
+    for r in [1.0, 1.5, 2.0, 2.5, 2.8, 3.0]
+        fps = fixed_points(r)
+        print("  r = $(lpad(r,3))  →  ")
+        if isempty(fps)
+            println("no fixed points found in (0,6)")
+        else
+            for xfp in fps
+                mu, lbl = stability(xfp, r)
+                @printf("  x* = %.4f  |f'| = %.4f  [%s]\n", xfp, mu, lbl)
+            end
+        end
+    end
+    println()
+end
 end
 
-# ╔═╡ 9160a9d6-f773-44b4-b95e-faa977b440e6
+# ╔═╡ 5a390871-3058-44c0-b8fa-476edefcfa88
+demo_fixed_points()
+
+# ╔═╡ a753302b-de44-417c-a3dc-94640593cb3a
 md"""
-# Simulation
-
-Here I have written a function which simulates the time evolution of the oscillators following the Kuramoto dynamics. The parameters are
-
-1. `θ_initial`: The phases of oscillators in the initial time step
-2. `ω`:- A vector containing the natural frequencies of oscillators
-3. `κ`:- The coupling constant for the model
-
-We compute the order parameter for each step, which is used for solving for the phase of oscillator using kuramoto dynamics and store the values of r, θ and Ψ for further analysis.
+## Bifurcation Diagram
 """
 
-# ╔═╡ 2b90a0ec-f3d0-49af-a8f4-00debca03a29
-begin
-	function simulate(θ_initial, ω, κ)
-		θ = copy(θ_initial)
-		r_vals = zeros(sim_time)
-		Ψ_vals = zeros(sim_time)
-		θ_frames = Vector{Vector{Float64}}()
+# ╔═╡ 4a3dc170-8600-472d-b0ea-12e1c964d157
+function bifurcation_diagram(;
+        r_range = (1.0, 3.0),
+        nr      = 2000,
+        n_trans = 1000,
+        n_plot  = 300,
+        x0      = 1.5)
 
-		for i in 1:sim_time
+    r_vals = range(r_range[1], r_range[2]; length=nr)
+    r_plot = Float64[]
+    x_plot = Float64[]
 
-			r, Ψ = compute_r_Ψ(θ)
-			
-			θ_dot = kuramoto(θ, ω, κ, r, Ψ)
-			
-			θ .+= θ_dot .* time_step
-			θ .= mod.(θ, 2π)
-
-			r_vals[i] = r
-			Ψ_vals[i] = Ψ
-
-			if i % save_interval == 0
-				push!(θ_frames, copy(θ))
-			end
-		end
-		
-		return θ_frames, r_vals, Ψ_vals
-	end
-end
-
-# ╔═╡ e1ad85b2-ac26-4220-a295-794aafa0aa5a
-md"""
-# Analysis
-This section contains the various analysis I've done on the Kuramoto model. First we study how synchronization varies with the coupling constant κ. After this we explore the synchronization when the natural frequencies are sampled from a Lorentzian distribution. To do this first I have made 3 settings,
-1. `κ` = 0.5 (minimal coupling)
-2. `κ` = 2 (intermediate coupling)
-3. `κ` = 5 (strong coupling)
-
-"""
-
-# ╔═╡ 2cf396dc-2372-4549-b7a0-2c5754c1d031
-begin
-	θ_vals_run_1, r_vals_run_1, _ = simulate(θ_initial, ω, 0.5)
-	θ_vals_run_2, r_vals_run_2, _ = simulate(θ_initial, ω, 5)
-	θ_vals_run_3, r_vals_run_3, _ = simulate(θ_initial, ω, 2)
-	print("Simulation over")
-end
-
-# ╔═╡ 2e8285fc-d077-4729-9737-9c54df8edf0e
-md"""
-## r vs t
-In this we plot a timeseries for the values of r for the 3 model settings previously stated. We can see that as κ increases $r$ approaches 1. 
-A value of $r$ that approaches 1 indicates synchronized state. 
-"""
-
-# ╔═╡ 593aaf0a-7a28-4ce6-9af3-5b54a9d29137
-begin
-	t_vals = (1:sim_time) .* time_step
-
-	plot(t_vals, r_vals_run_2,
-	     xlabel="t",
-	     ylabel="r(t)",
-	     title="Order Parameter vs Time",
-	     lw=2,
-	     legend=:outertopright,
-		 label="Κ = 5"
-		)
-	
-	plot!(t_vals, r_vals_run_3, label="κ = 2", lw=2)
-
-	plot!(t_vals, r_vals_run_1, label="Κ = 0.5", lw=2)
-end
-
-# ╔═╡ 2fc64c35-4747-4e7b-8927-c907c0a4f9b3
-md"""
-## Phase Evolution Of Oscillators
-
-In this section I visualize the oscillators plotted in a unit circle. This and the above method is a good way of checking whether our model is working correctly or not. I have plotted the phase dynamics of the 3 settings. One can see that when the coupling is too low the oscillators seem to be oscillating in their own natural frequency without any synchronization but as the coupling increases synchronization slowly starts to come into the system. The red arrow points towards the mean direction of the entire population while the magnitude of it represents the order of synchronization. 
-"""
-
-# ╔═╡ 4d875a9a-7e69-440d-8dd4-c4fb5af610e4
-function animate_phase_and_r(θ_vals, r_vals)
-
-    ϕ = range(0, 2π, length=200)
-
-    frame_count = length(θ_vals)
-
-    # sample r_vals to match saved frames
-    r_sample = r_vals[1:save_interval:end]
-
-    t_vals = (1:length(r_sample)) .* time_step .* save_interval
-
-    anim = @animate for k in 1:frame_count
-
-        θ = θ_vals[k]
-
-        x = cos.(θ)
-        y = sin.(θ)
-
-        z = mean(exp.(im .* θ))
-        r = abs(z)
-        Ψ = angle(z)
-
-        # unit circle plot
-        p1 = scatter(
-            x, y;
-            aspect_ratio=:equal,
-            xlims=(-1.2,1.2),
-            ylims=(-1.2,1.2),
-            legend=false,
-            title="Oscillator Phases"
-        )
-
-        plot!(p1, cos.(ϕ), sin.(ϕ), lw=2)
-
-        quiver!(p1, [0], [0],
-            quiver=([r*cos(Ψ)], [r*sin(Ψ)]),
-            color=:red,
-            linewidth=3)
-
-        # r vs t
-        p2 = plot(
-            t_vals[1:k],
-            r_sample[1:k];
-            xlabel="t",
-            ylabel="r(t)",
-            ylim=(0,1),
-            lw=2,
-            legend=false,
-            title="Order Parameter Evolution"
-        )
-
-        plot(p1, p2, layout=(1,2), size=(900,400))
-
+    for r in r_vals
+        x = x0
+        # burn transient
+        for _ in 1:n_trans
+            x = f(x, r)
+            (x ≤ 0 || isnan(x) || isinf(x)) && (x = x0; break)
+        end
+        # record attractor
+        for _ in 1:n_plot
+            x = f(x, r)
+            (x ≤ 0 || isnan(x) || isinf(x)) && break
+            push!(r_plot, r)
+            push!(x_plot, x)
+        end
     end
 
-    gif(anim, "kuramoto_phase_r.gif", fps=25)
-
+    p = scatter(r_plot, x_plot;
+        markersize=0.5, markerstrokewidth=0, alpha=0.4,
+        color=:navy,
+        xlabel="r", ylabel="x*",
+        title="Bifurcation diagram  f(x) = x² exp(r − x)",
+        legend=false,
+			   xlims=(1.85, 3))
+    return p
 end
 
-# ╔═╡ 07e7eece-6ae8-48e0-82a8-b2edcfa3dc96
-md"""
-### κ = 0.5
 
-We can see that the oscillators are oscillating with their own natural frequencies and no synchronization can be observed. The vector is pointing in random directions and the magnitude is close to 0 which shows that the system is not synchronized.
-"""
 
-# ╔═╡ 43ca32fd-655f-401f-ae5d-95e52d72533c
-animate_phase_and_r(θ_vals_run_1, r_vals_run_1)
-
-# ╔═╡ a0c4d56f-1963-43b2-bdc3-1b0c5f6c8c33
-md"""
-### κ = 2
-When κ is set to 2, we can observe that a majority part of the population is synchronized while there are still others who aren't. These oscillators that aren't synchronized are said to be in drift. The order parameter has a magnitude of approximately 0.8 and is pointing towards the mean direction of the population.
-"""
-
-# ╔═╡ a56c4254-aece-4426-be0c-028261ec84d2
-animate_phase_and_r(θ_vals_run_3, r_vals_run_3)
-
-# ╔═╡ c74746fe-df38-46c3-9a3e-e1960315e05f
-md"""
-### κ = 5
-This is the case of highly coupled system. In this we can see that all the oscillators are moving in sync and the vector is pointing along the mean direction of the entire population. Apart from this it is also to be noted that when the magnitude of the vector approaches 1, the system reaches a synchronized state. 
-
-"""
-
-# ╔═╡ b3d34468-5aaf-4b47-92fc-5e074f98d863
-animate_phase_and_r(θ_vals_run_2, r_vals_run_2)
-
-# ╔═╡ 5f0f2db3-b49d-4ddf-8e41-f560a5c033a3
-md"""
-## r_inf vs κ
-
-In here we study the variation of $r$ with κ. We can see that initially till a particular threshold, the value of $r$ is very low, indicating no synchronization. But once it hits a threshold value, $r$ shoots up to 1 and stays there. This particular threshold value is denoted as κc. In the next section, we see how the find the predicted value of κc and the one calculated from our data.  
-"""
-
-# ╔═╡ 5a301324-0d71-4585-9f1e-aa290742cdd9
+# ╔═╡ 9df32e77-ddfe-45d5-99ea-27f87b76cc54
 begin
-	κ_vals = range(0, 10, length=70)
-
-	r_inf_vals = zeros(length(κ_vals))
-
-	for (i, κ) in enumerate(κ_vals)
-		_, r_vals_tmp, _ = simulate(θ_initial, ω, κ)
-
-		r_inf_vals[i] = mean(r_vals_tmp[end-200:end])
-	end
-	
-	plot(κ_vals, r_inf_vals,
-		xlabel="κ",
-		ylabel="r∞",
-		lw=2,
-		title="Synchronization transition for Gaussian")
+p_bif = bifurcation_diagram()
 end
 
-# ╔═╡ 50c58ab3-679b-404e-8bf4-7a7b1e067b4d
+# ╔═╡ cf557b13-4c32-45ef-956c-59ddf57ba95e
 md"""
-## Analysis of Predicted κc value and value obtained from simulation
+# Cobweb Diagram
 
-Kuramoto had derived a formula for finding the value of κc and it is given by 
-
-$$\kappa_c = \frac{2}{\pi g(0)}$$ 
-
-where g is the distribution from which natural frequencies ωᵢ are sampled from.
-
-In our case
-
-$$g(0) = \frac{1}{\sqrt{2\pi}}$$
-
-since the ωᵢ are sampled from Gaussian with mean = 0 and variance = 1.
-
-So we have
-
-$$\kappa_c = \frac{2\sqrt{2\pi}}{\pi}$$
-
-$$\kappa_c = 1.596$$
-
+Long-term behavior of the system is studied using this
 """
 
-# ╔═╡ 92e47581-3bc9-4201-bc4c-feb41abddb43
+# ╔═╡ 56d00795-87bb-4a26-9a5f-368fc7e10fba
 begin
-	κc_pred_gaussian = 2*sqrt(2π)/π
-	println("Theoretical value for κc = $κc_pred_gaussian")
+function cobweb(r::Float64, x0::Float64; n::Int=80, xmax=nothing)
+    isnothing(xmax) && (xmax = r + 1.0)
+    xs = range(1e-3, xmax; length=800)
+    ys = f.(xs, r)
+
+    cx, cy = Float64[], Float64[]
+    x = x0
+    push!(cx, x); push!(cy, 0.0)       
+    for _ in 1:n
+        y = f(x, r)
+        (y ≤ 0 || isnan(y) || isinf(y)) && break
+        push!(cx, x); push!(cy, y)       
+        push!(cx, y); push!(cy, y)       
+        x = y
+    end
+
+    p = plot(xs, ys; color=:steelblue, lw=1.5, label="f(x)", legend=:topleft)
+    plot!(xs, xs; color=:grey, lw=1.0, ls=:dash, label="y = x")
+    plot!(cx, cy; color=:crimson, lw=0.8, alpha=0.8, label="orbit")
+    scatter!([x0], [0.0]; color=:green, ms=5, label="x₀=$(x0)")
+    xlabel!("x"); ylabel!("f(x)")
+    title!("Cobweb  r = $r")
+    return p
 end
 
-# ╔═╡ 9a599802-62b2-466d-86d3-3644d784ab33
+end
+
+
+# ╔═╡ 02f06167-fbc3-4f1b-b166-9cabf65cc9ff
+begin
+	
+r_cobweb = [1.5, 2.0, 2.5, 2.85]
+cobweb_panels = [cobweb(r, 1.5) for r in r_cobweb]
+p_cobweb = plot(cobweb_panels...; layout=(2,2), size=(900,700))
+
+end
+
+# ╔═╡ d167fca0-7fc3-465d-a0ef-c27759f5e5c3
 md"""
-**Finding the value of $\kappa_c$ from data**
-
-We know that $\kappa_c$ is the value of κ where the value of r starts to increase quickly, which can be interpreted as the point where the slope of $r_\infty$ vs κ plot has the maximum value. This is how we determine the value for κc from our data. 
-
-$$\kappa_c = \mathrm{argmax}{\frac{dr_\infty}{d\kappa}}$$
+## Lyapunov Exponents
 """
 
-# ╔═╡ 586aef48-0aa5-43c0-8ea2-d685a70d89a1
-begin
-	slopes = diff(r_inf_vals) ./ diff(κ_vals)
-	index = argmax(slopes)
-	κc_esti = κ_vals[index]
-	println("Estimated Kc = ", κc_esti)
+# ╔═╡ 748044c5-83c0-4f8b-9fa0-76d1befc4a9c
+function lyapunov_single(r::Float64; x0=1.5, n_trans=2000, n_iter=50_000)
+    x = x0
+    for _ in 1:n_trans
+        x = f(x, r)
+        (x ≤ 0 || isnan(x) || isinf(x)) && return NaN
+    end
+    lam = 0.0
+    for _ in 1:n_iter
+        dx = abs(df(x, r))
+        (dx ≤ 0 || isnan(dx)) && return NaN
+        lam += log(dx)
+        x = f(x, r)
+        (x ≤ 0 || isnan(x) || isinf(x)) && return NaN
+    end
+    return lam / n_iter
 end
 
-# ╔═╡ cfcc03c8-c380-4e3e-9842-2e47b3fb7d76
+# ╔═╡ 3b9e43ad-3b2e-468f-9dbe-b4b204886da3
+begin
+r_vals_le  = range(1.0, 3.0; length=1500)
+le_vals    = lyapunov_single.(r_vals_le)
+
+p_le = plot(r_vals_le, le_vals;
+    color=:darkgreen, lw=1.0,
+    xlabel="r", ylabel="λ(r)",
+    title="Lyapunov exponent  λ(r)",
+    legend=false)
+hline!([0.0]; color=:red, ls=:dash, lw=1.0)
+
+p_le
+end
+
+# ╔═╡ 830bfbeb-9efa-4756-99af-f13975e03686
 md"""
-Making the $r_\infty$ vs κ plot again with the theoretical and observed κc values
+## Coupled Map Lattice
 """
 
-# ╔═╡ 3dc07f43-d3cd-4faf-8015-140de519921f
-begin
-	plot(κ_vals, r_inf_vals,
-		xlabel="κ",
-		ylabel="r∞",
-		lw=3,
-		title="Synchronization Transition For Gaussian")
-	vline!([κc_pred_gaussian], label="Predicted value of κc = $(round(κc_pred_gaussian, digits=3))", lw=2, linestyle=:dash)
-	vline!([κc_esti], label="Estimated value for κc = $(round(κc_esti, digits=3))", lw=2, linestyle=:dot)
+# ╔═╡ a9ed971a-88c6-4183-9725-230aefd8713c
+function evolve_cml(r::Float64, ε::Float64, N::Int, T::Int;
+                    x0::Union{Nothing,Vector{Float64}}=nothing)
+    X = zeros(N, T+1)
+    if isnothing(x0)
+        X[:, 1] = 0.5 .+ 2.0 .* rand(N)
+    else
+        X[:, 1] = copy(x0)
+    end
+
+    for t in 1:T
+        xc = X[:, t]
+        fx = f.(xc, r)
+        for i in 1:N
+            il = mod1(i-1, N)
+            ir = mod1(i+1, N)
+            X[i, t+1] = (1.0 - ε) * fx[i] + (ε/2.0) * (fx[il] + fx[ir])
+        end
+    end
+    return X
 end
 
-# ╔═╡ 58020ae8-7a3b-4a17-a7b1-3c33c59d6925
+# ╔═╡ ffcaabc6-3b12-4f55-a8c6-762f704d8a35
 md"""
-## Comparison of Analytical Prediction and Simulation for the Lorentzian Case
-
-Now we consider the case where the natural frequencies of oscillators are sampled from a Lorentzian instead of Gaussian. In this case, 
-
-$$g(ω) = \frac{\gamma}{\pi(\omega^2 + \gamma^2)}$$ 
-
-In the steady state we have 
-
-$$r_{\infty} = 
-\begin{cases} 
-0 & K \le K_c \\ 
-\sqrt{1 - \frac{K_c}{K}} & K > K_c 
-\end{cases}$$
-
-For the distribution we have chosen, we have $\gamma = 1$, hence we have
-
-$$g(0) = \frac{1}{\pi}$$
-
-which gives 
-
-$$\kappa_c = 2$$
+### Spatiotemporal Plots
 """
 
-# ╔═╡ 6feb4efa-fbef-4906-a758-3d71248f985c
-begin
-	cauchy_distribution = Cauchy(0, 1)
-	ω_lorentzian = rand(cauchy_distribution, N)
-	print("Omegas have been sampled from Cauchy")
+# ╔═╡ 42580c19-5cbd-460d-a811-a3bebb90c61f
+md"""
+Spatiotemporal plots were made for the map. We can see spatiotemporal intermittency, defect turbulence, as well as pattern selection with suppression of chaos
+"""
+
+# ╔═╡ 06e8d69d-d488-4544-907d-39f83b503517
+function spatio_temporal_plot(X::Matrix{Float64};
+        ptitle="", clims=nothing)
+    N, T = size(X)
+    kw = isnothing(clims) ? () : (clims=clims,)
+    heatmap(1:T, 1:N, X;
+        color=:inferno, xlabel="Time step", ylabel="Site i",
+        title=ptitle, colorbar_title=" x_i(n)",
+        kw...)
 end
 
-# ╔═╡ af9cdf8f-3302-400f-9f62-45c5e8f18c09
-begin	
-	r_inf_vals_lorentzian = Float64[]
+# ╔═╡ 7c6f7d16-1627-43ca-bd7f-5fe320ee322f
+begin
 	
-	for κ in κ_vals
-	    θ_vals_tmp, r_vals_tmp, _ = simulate(θ_initial, ω_lorentzian, κ)
-	
-	    r_inf_val = mean(r_vals_tmp[end-100:end])
-	
-	    push!(r_inf_vals_lorentzian, r_inf_val)
-	end
+r_chaos = 2.8
+N_cml = 100
+T_cml = 500
+
+eps_vals_st = [0.0, 0.1, 0.3, 0.6]
+st_panels   = map(eps_vals_st) do ε
+    X = evolve_cml(r_chaos, ε, N_cml, T_cml)
+    spatio_temporal_plot(X[:, 1:T_cml]; ptitle="ε = $ε",
+        clims=(0.0, r_chaos+0.5))
 end
 
-# ╔═╡ 9935b788-020f-46ad-b511-95b791ddb144
+p_st = plot(st_panels...; layout=(2,2), size=(1100,800),
+    plot_title="Spatiotemporal plots  r=$(r_chaos)")
+p_st
+end
+
+# ╔═╡ e41400d7-3f23-44a9-b791-bdf0a0a3e136
+function calculate_order_parameter(X_snapshot; x_min=0.0, x_max=4.5)
+    N = length(X_snapshot)
+
+    phases = 2π .* (X_snapshot .- x_min) ./ (x_max - x_min)
+    
+    complex_mean = mean(exp.(im .* phases))
+    
+
+    return abs(complex_mean)
+end
+
+# ╔═╡ 55f935b3-aeb8-4903-b985-11e2e5290d61
+md"""
+## Order Parameter vs Coupling Strength
+
+In this plot, I explored how the order parameter changes for varying coupling strength. We can see that the system is almost in a synchronized state when ϵ ≈ 0.2 after which it never regains the synchronized state
+"""
+
+# ╔═╡ 34d379d6-e2bb-4e1e-9578-8c1d5647f9b2
+md"""
+Here I have plotted the synchronization error vs Coupling strength
+"""
+
+# ╔═╡ 3fb58d11-9441-4340-9dd1-718258bfe41b
+function sync_order_parameter(r::Float64, ε::Float64, N::Int, T::Int;
+                               n_trans::Int=500)
+    X = evolve_cml(r, ε, N, T + n_trans)
+    Xss = X[:, (n_trans+1):end]      # discard transient
+    # σ(n) = std of spatial snapshot at time n
+    return mean(std(Xss[:, t]) for t in 1:T)
+end
+
+# ╔═╡ ca7236cf-892a-4b5c-a0c0-45def159d9d6
 begin
-	κc_lorentzian = 2
 	
-	r_theory = zeros(length(κ_vals))
+eps_range = range(0.0, 0.7; length=80)
+r_vals_sync = [2.0, 2.5, 2.8, 3.0]
+N_s, T_s = 64, 300
+
+p_sync = plot(; xlabel="Coupling strength ε",
+    ylabel="⟨σ⟩  (synchronisation error)",
+    title="Synchronisation vs coupling  (N=$(N_s))",
+    legend=:topright)
+
+colors_sync = [:navy, :steelblue, :darkorange, :crimson]
+for (ri, r) in enumerate(r_vals_sync)
+    σ_vals = [sync_order_parameter(r, ε, N_s, T_s) for ε in eps_range]
+    plot!(p_sync, eps_range, σ_vals;
+        lw=1.8, color=colors_sync[ri], label="r = $r")
+end
+p_sync
+end
+
+# ╔═╡ b670996a-3980-4915-8c29-db81a47d5191
+md"""
+# Network
+"""
+
+# ╔═╡ c4429221-512f-49ae-baca-9e101970c2bc
+
+	begin
+	    N_net = 50
+	    g_ring = cycle_graph(N_net)
+	    g_er   = erdos_renyi(N_net, 6/N_net) 
+	    g_ba   = barabasi_albert(N_net, 3)
+	    g_ws   = watts_strogatz(N_net, 6, 0.1)
+	    
+	    graphs      = [g_ring, g_er, g_ba, g_ws]
+	    graph_names = ["Ring", "Erdős-Rényi", "Barabási-Albert", "Watts-Strogatz"]
+	    
+	    @printf("\n%-20s %-6s %-6s %-6s %-10s %-8s\n", 
+	            "Name", "Nodes", "Edges", "⟨k⟩", "Clust", "Diam")
+	    println("-"^60)
 	
-	for (i, κ) in enumerate(κ_vals)
-	
-	    if κ > κc_lorentzian
-	        r_theory[i] = sqrt(1 - κc_lorentzian/κ)
-	    else
-	        r_theory[i] = 0
+	    for (g, name) in zip(graphs, graph_names)
+	        n_val = nv(g)
+	        e_val = ne(g)
+	        kbar  = 2 * e_val / n_val
+	        cl    = global_clustering_coefficient(g)
+	        
+	        dm    = is_connected(g) ? diameter(g) : -1 
+	        
+	        @printf("%-20s %6d %6d %6.2f %10.4f %8d\n", 
+	                name, n_val, e_val, kbar, cl, dm)
 	    end
 	end
+
+
+# ╔═╡ c77d663e-55b9-416d-806a-8cf3b6aec45a
+
+function evolve_network(r::Float64, ε::Float64, g::AbstractGraph, T::Int;
+                        x0::Union{Nothing,Vector{Float64}}=nothing)
+    N = nv(g)
+    degs = degree(g)
+    X = zeros(N, T+1)
+    if isnothing(x0)
+        X[:, 1] = 0.5 .+ 2.0 .* rand(N)
+    else
+        X[:, 1] = copy(x0)
+    end
+
+    for t in 1:T
+        fx = f.(X[:, t], r)
+        for i in 1:N
+            nbrs = neighbors(g, i)
+            coupling = isempty(nbrs) ? 0.0 : sum(fx[j] for j in nbrs) / degs[i]
+            X[i, t+1] = (1.0 - ε)*fx[i] + ε*coupling
+        end
+    end
+    return X
 end
 
-# ╔═╡ b382480b-ad71-489b-b712-a61ade7f47be
-md"""
-We find that the result obtained from our simulation and the one that is obtained from the analytical result is matching closely. There are some deviations which could be attributed to the finiteness of the number of oscillators.
-"""
 
-# ╔═╡ 463716fd-75b1-4155-84e6-443e9b952153
+
+# ╔═╡ 15e9ea06-c90d-48a1-8f05-47fba637d8e0
 begin
-	plot(
-	    κ_vals,
-	    r_inf_vals_lorentzian,
-	    lw=2,
-	    label="Simulation",
-	    xlabel="K",
-	    ylabel="r∞",
-	    title="Synchronization transition For Lorentzian"
-	)
-	
-	plot!(
-	    κ_vals,
-	    r_theory,
-	    lw=3,
-	    linestyle=:dash,
-	    label="Theory"
-	)
-	
-	vline!(
-	    [κc_lorentzian],
-	    linestyle=:dot,
-	    linewidth=2,
-	    label="Kc = 2"
-	)
+    eps_vals = range(0.0, 0.6; length=100)
+    r_val = 2.8 
+    N_nodes = 100
+    T_steps = 500
+    T_trans = 400 
+    avg_R = Float64[]
+
+    for ε in eps_vals
+        
+        X = evolve_network(r_val, ε, g_ring, T_steps + T_trans)
+        
+        X_steady = X[:, (T_trans+1):end]
+        
+        R_t = [calculate_order_parameter(X_steady[:, t]) for t in 1:T_steps]
+        push!(avg_R, mean(R_t))
+    end
+
+    plot(eps_vals, avg_R, lw=2.5, color=:darkorchid,
+         xlabel="Coupling Strength ε", ylabel="Order Parameter ⟨R⟩",
+         title="Synchronization Phase Transition (r = $r_val)",
+         label="Coherence", grid=true, marker=:circle, ms=2)
 end
 
-# ╔═╡ 26ccf701-3856-49f8-a3b6-5c7ccee79984
+# ╔═╡ a53bb39e-1c5c-4c64-a6e0-b6d796c6fb71
 md"""
-# Observations
+## Analysing Synchronisation for different networks at r = 2.8
 
-1. From the analysis it is understood that as coupling increases the oscillators start to synchronize and move at a common fixed frequency. From the $r_\infty$ vs κ plot it has been understood that after a particular threshold, the synchronization state is obtained for all values of κ. 
-
-2. Found that the theoretical value obtained for the critical coupling differs slightly from what has been found in the simulation, which could be due to the finite number of oscillators. 
-
-3. The analytical solution for Lorentzian lies in close match with what has been observed in the simulation
-
+We see that BA and ER network synchronize faster compared to ring and watts-strogatz
 """
 
-# ╔═╡ c8650f24-675c-4c3c-9e91-63de697bed70
+# ╔═╡ 42d72359-6363-4ebd-82c2-0e6b4bcb4a8e
+begin
+eps_net   = range(0.0, 0.8; length=60)
+r_net     = 2.8
+T_net     = 400
+trans_net = 300
+N_net2    = 50   
+
+x0_shared = 0.5 .+ 2.0 .* rand(N_net2)
+
+p_netsync = plot(; xlabel="Coupling strength ε",
+    ylabel="⟨σ⟩  (synchronisation error)",
+    title="Synchronisation on different network topologies  r=$(r_net), N=$(N_net2)",
+    legend=:topright)
+
+net_colors = [:navy, :darkorange, :crimson, :green]
+for (gi, (g, name)) in enumerate(zip(graphs, graph_names))
+    σ_net = map(eps_net) do ε
+        X  = evolve_network(r_net, ε, g, T_net + trans_net; x0=copy(x0_shared))
+        Xss = X[:, (trans_net+1):end]
+        mean(std(Xss[:, t]) for t in 1:T_net)
+    end
+    plot!(p_netsync, eps_net, σ_net;
+        lw=2.0, color=net_colors[gi], label=name)
+end
+savefig(p_netsync, "08_network_sync_comparison.png")
+p_netsync
+end
+
+# ╔═╡ 6bdb1b5a-4631-43b8-ad2f-5f10f9e7a2bc
+function laplacian_matrix(g::AbstractGraph)
+    N = nv(g)
+    L = zeros(N, N)
+    for i in 1:N
+        L[i, i] = degree(g, i)
+        for j in neighbors(g, i)
+            L[i, j] = -1.0
+        end
+    end
+    return L
+end
+
+# ╔═╡ d454308a-9d9a-4603-945d-bcf07d5daeeb
 md"""
-# References
+## Laplacian Spectra
 
-1. Lecture slides for Kuramoto Model by Dr. Sudeshna Sinha. Much of the theory behind the model has been taken from here.
-
-2. [^plots] Plots.jl library was used extensively for plotting.
-
-3. [^statistics] Statistics.jl library was used for a couple of functions.
-
-4. [^distributions] Distributions.jl library was used for sampling the natural frequencies.
-
-5. [^pluto] Pluto.jl has been used for making the term paper. 
-
-6. [^julia] The code has been written in Julia
-
-7. [^fireflies] [Article](https://jasonfantl.com/posts/Firefly-Synchronization/) on firefly synchronization gives a good dive into the synchronization phenomenon in fireflies.
+The Ring lattice has the smallest spectral gap (λ₂=0.02), indicating poor global connectivity and slow synchronization. In contrast, the Erdős-Rényi and Barabási-Albert models show significantly higher λ₂ values (1.44 and 1.36 respectively), proving that random shortcuts and hub nodes facilitate much faster information spread.
 """
+
+# ╔═╡ f9c33963-f36c-4f7e-8265-84725aee8bdc
+begin
+println("Laplacian spectral analysis:")
+println("$(lpad("Graph",20))  $(lpad("λ₂ (Fielder)",13))  ",
+        "$(lpad("λ_max",8))  $(lpad("λ₂/λ_max",10))")
+
+spectral_panels = Plots.Plot[]
+for (g, name) in zip(graphs, graph_names)
+    L  = laplacian_matrix(g)
+    ev = sort(real.(eigvals(Matrix(L))))
+    λ2 = ev[2]
+    λN = ev[end]
+    @printf("  %-18s  %13.4f  %8.4f  %10.4f\n", name, λ2, λN, λ2/λN)
+
+    push!(spectral_panels,
+        bar(ev; color=:steelblue, alpha=0.7,
+            xlabel="Index", ylabel="Eigenvalue",
+            title="$name  (λ₂=$(round(λ2,digits=2)))",
+            legend=false, ylims=(-0.5, λN*1.1)))
+end
+println()
+p_lap = plot(spectral_panels...; layout=(2,2), size=(900,700),
+    plot_title="Laplacian spectra")
+p_lap
+end
+
+# ╔═╡ 432ea1ce-6fa8-44c4-87ee-d8b5dbb1c4d3
+function bfs_ordering(g::AbstractGraph)
+    src = argmax(degree(g))  
+    dist = fill(typemax(Int), nv(g))
+    dist[src] = 0
+    queue = [src]
+    order = Int[]
+    while !isempty(queue)
+        v = popfirst!(queue)
+        push!(order, v)
+        for u in neighbors(g, v)
+            if dist[u] == typemax(Int)
+                dist[u] = dist[v] + 1
+                push!(queue, u)
+            end
+        end
+    end
+    return order
+end
+
+
+# ╔═╡ e41150e9-09d9-431b-9616-820a7db670a3
+md"""
+## Spatiotemporal Plots For Different Networks
+"""
+
+# ╔═╡ 7ca7122f-fa7b-4e65-a0e3-41cf1aef4bcf
+begin
+eps_st_net = 0.15
+T_st_net   = 400
+st_net_panels = Plots.Plot[]
+for (g, name) in zip(graphs, graph_names)
+    X   = evolve_network(r_net, eps_st_net, g, T_st_net)
+    ord = bfs_ordering(g)
+    push!(st_net_panels,
+        heatmap(1:T_st_net, 1:N_net, X[ord, 1:T_st_net];
+            color=:inferno, xlabel="Time", ylabel="Node (BFS order)",
+            title="$name  ε=$(eps_st_net)",
+            colorbar=false, clims=(0, r_net+0.5)))
+end
+p_st_net = plot(st_net_panels...; layout=(2,2), size=(1100,800),
+    plot_title="Spatiotemporal: network-coupled  r=$(r_net)")
+savefig(p_st_net, "10_spatiotemporal_networks.png")
+p_st_net
+end
+
+# ╔═╡ dc5a39f5-3705-4afa-8815-37923fc8946e
+md"""
+## Power Spectrum Of Single Lattice
+"""
+
+# ╔═╡ cb10b302-b0b6-43f1-aeb3-cd333ae9224f
+md"""
+You can see that at r = 2.8, the spectrum becomes chatoic indicating chaos in the system
+"""
+
+# ╔═╡ b4aeb830-df6b-4283-949b-6a2fcd2b242d
+function power_spectrum(r::Float64; site=1, N=32, ε=0.05, T=8192, n_trans=2000)
+    X   = evolve_cml(r, ε, N, T + n_trans)
+    ts  = X[site, (n_trans+1):end]
+    ts .-= mean(ts)
+    spec = abs2.(fft(ts)) ./ length(ts)
+    freqs = (0:(length(ts)÷2)) ./ length(ts)
+    return freqs, spec[1:(length(ts)÷2+1)]
+end
+
+
+# ╔═╡ 175fa203-79b8-42dc-aa43-14ba1caddedd
+begin
+	
+r_psd_vals = [2.0, 2.5, 2.8]
+psd_panels = Plots.Plot[]
+for r_p in r_psd_vals
+    fs, ps = power_spectrum(r_p; T=4096)
+    push!(psd_panels,
+        plot(fs[2:end], log10.(ps[2:end] .+ 1e-20);
+            color=:purple, lw=0.8,
+            xlabel="Frequency", ylabel="log₁₀ PSD",
+            title="PSD  r = $r_p", legend=false))
+end
+p_psd = plot(psd_panels...; layout=(1,3), size=(1000,350))
+p_psd
+end
+
+# ╔═╡ db0415d4-c71e-4b7f-9cb9-a09b4b000ec8
+function spatial_correlation(X::Matrix{Float64}; max_lag=nothing)
+    N, T = size(X)
+    isnothing(max_lag) && (max_lag = N÷2)
+    C = zeros(max_lag)
+    for t in 1:T
+        xc = X[:, t] .- mean(X[:, t])
+        v  = var(X[:, t])
+        v < 1e-12 && continue
+        for d in 1:max_lag
+            C[d] += mean(xc[i]*xc[mod1(i+d, N)] for i in 1:N) / v
+        end
+    end
+    return C ./ T
+end
+
+# ╔═╡ 99d08560-f8ca-453e-90e0-1cf0643fa749
+md"""
+## Attack On The Network
+Prior to the attack, the network maintains a state of collective chaotic synchronization. At t=300, the removal of the primary hub (Degree = 23) effectively increases the average path length of the system beyond the threshold where the coupling strength (ϵ=0.5) can maintain order. This leads to an immediate spatiotemporal collapse, characterized by a significant increase in the standard deviation (σ) and the disintegration of phase coherence across the lattice."
+"""
+
+# ╔═╡ de1100a2-b786-4005-beb6-a58acb29dd93
+function simulate_targeted_attack(g::AbstractGraph, r::Float64, ε::Float64, T_total::Int; 
+                                   attack_time=200)
+    N = nv(g)
+    X = zeros(N, T_total)
+    X[:, 1] = 0.5 .+ 2.0 .* rand(N)
+    
+    hub_node = argmax(degree(g))
+    degs = degree(g)
+    
+    for t in 1:(T_total-1)
+        fx = [f(X[i, t], r) for i in 1:N]
+        
+        for i in 1:N
+
+            if t > attack_time && i == hub_node
+                X[i, t+1] = 0.0 
+                continue
+            end
+            
+            nbrs = neighbors(g, i)
+            active_nbrs = t > attack_time ? filter(x -> x != hub_node, nbrs) : nbrs
+            
+            if isempty(active_nbrs)
+                coupling = 0.0
+            else
+                coupling = sum(fx[j] for j in active_nbrs) / length(active_nbrs)
+            end
+            
+            X[i, t+1] = (1.0 - ε) * fx[i] + ε * coupling
+        end
+    end
+    
+    σ_t = [std(filter(x -> x > 0, X[:, t])) for t in 1:T_total]
+    
+    return X, σ_t, hub_node
+end
+
+# ╔═╡ ff96eca1-5545-48e7-883c-5cf0a72778ce
+begin
+    T_sim = 600
+    t_attack = 300
+    
+    X_attack, σ_attack, the_hub = simulate_targeted_attack(g_ba, 2.6, 0.5, T_sim; 
+                                                           attack_time=t_attack)
+    
+    p_err = plot(1:T_sim, σ_attack, lw=2, color=:crimson, label="Sync Error σ(t)")
+    vline!([t_attack], label="Hub Removal", ls=:dash, color=:black)
+annotate!(t_attack + 10, 0.1, Plots.text("Hub degree: $(degree(g_ba, the_hub))", :left, 8))
+    xlabel!("Time step")
+    ylabel!("Spatial Standard Deviation")
+    title!("Robustness: Impact of Hub Removal (BA Network)")
+
+    p_heat = heatmap(1:T_sim, 1:nv(g_ba), X_attack;
+                     color=:inferno, xlabel="Time", ylabel="Node Index",
+                     title="Spatiotemporal Collapse")
+    vline!([t_attack], color=:white, lw=2, label="")
+
+    plot(p_err, p_heat, layout=(2,1), size=(800, 700))
+end
+
+# ╔═╡ 16d5ec18-eded-4747-ab48-822a14078d55
+md"""
+## Search For Chimera Like States
+The system exhibits a Chimera state, characterized by the spontaneous coexistence of synchronized and incoherent domains within an identical population of oscillators. This symmetry breaking is confirmed by the bimodal distribution of the local order parameter, which distinguishes the stable clusters from the chaotic regions.
+"""
+
+# ╔═╡ 428e5dd8-8cb4-4a82-8bcb-9278ff489136
+begin
+	function local_order_parameter(X::Matrix{Float64}, g::AbstractGraph;
+	        window=5)
+	    N, T = size(X)
+	    R = zeros(N)
+	    for i in 1:N
+	        nbrs = [i; neighbors(g, i)]
+	        R[i] = mean(std(X[nbrs, t]) for t in 1:T)
+	    end
+	    return R
+	end
+	
+	eps_chimera = 0.25
+	T_chim      = 600
+	X_chim = evolve_network(r_net, eps_chimera, g_ws, T_chim + 200)
+	R_loc  = local_order_parameter(X_chim[:, 201:end], g_ws)
+	
+	p_chim1 = bar(1:N_net, R_loc;
+	    color=ifelse.(R_loc .< mean(R_loc) .- std(R_loc), :navy, :crimson),
+	    xlabel="Node", ylabel="Local order param. Rᵢ",
+	    title="Local coherence  WS graph  r=$(r_net)  ε=$(eps_chimera)",
+	    legend=false)
+	
+	p_chim2 = histogram(R_loc;
+	    bins=15, color=:steelblue, alpha=0.8,
+	    xlabel="Rᵢ", ylabel="Count",
+	    title="Distribution of Rᵢ  (bimodal → chimera)",
+	    legend=false)
+	
+	p_chimera = plot(p_chim1, p_chim2; layout=(1,2), size=(900,400))
+	savefig(p_chimera, "11_chimera_detection.png")
+	p_chimera
+end
+
+# ╔═╡ 1284c9d2-4beb-4c98-becc-e069f60d8556
+
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
-Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
-LsqFit = "2fda8390-95c7-5789-9bda-21331edee243"
+FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
+Karnak = "cd156443-31ad-4f6f-850f-a93ee5f75905"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
-PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
-Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
-Distributions = "~0.25.123"
-LsqFit = "~0.15.1"
-Plots = "~1.41.4"
-PlutoUI = "~0.7.79"
+FFTW = "~1.10.0"
+Graphs = "~1.13.4"
+Karnak = "~1.2.0"
+Plots = "~1.41.6"
+StatsBase = "~0.34.10"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -554,42 +765,21 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "cee7bed5badb2e8e6b56e86c2f1fdbf472ef3a4e"
+project_hash = "4527eae56c8aaf9d82150b6a407f815d5be6d4d1"
 
-[[deps.ADTypes]]
-git-tree-sha1 = "f7304359109c768cf32dc5fa2d371565bb63b68a"
-uuid = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
-version = "1.21.0"
+[[deps.AbstractFFTs]]
+deps = ["LinearAlgebra"]
+git-tree-sha1 = "d92ad398961a3ed262d8bf04a1a2b8340f915fef"
+uuid = "621f4979-c628-5d54-868e-fcf4e3e8185c"
+version = "1.5.0"
 
-    [deps.ADTypes.extensions]
-    ADTypesChainRulesCoreExt = "ChainRulesCore"
-    ADTypesConstructionBaseExt = "ConstructionBase"
-    ADTypesEnzymeCoreExt = "EnzymeCore"
+    [deps.AbstractFFTs.extensions]
+    AbstractFFTsChainRulesCoreExt = "ChainRulesCore"
+    AbstractFFTsTestExt = "Test"
 
-    [deps.ADTypes.weakdeps]
+    [deps.AbstractFFTs.weakdeps]
     ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
-    ConstructionBase = "187b0558-2788-49d3-abe0-74a17ed4e7c9"
-    EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
-
-[[deps.AbstractPlutoDingetjes]]
-deps = ["Pkg"]
-git-tree-sha1 = "6e1d2a35f2f90a4bc7c2ed98079b2ba09c35b83a"
-uuid = "6e696c72-6542-2067-7265-42206c756150"
-version = "1.3.2"
-
-[[deps.Adapt]]
-deps = ["LinearAlgebra", "Requires"]
-git-tree-sha1 = "7e35fca2bdfba44d797c53dfe63a51fabf39bfc0"
-uuid = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
-version = "4.4.0"
-
-    [deps.Adapt.extensions]
-    AdaptSparseArraysExt = "SparseArrays"
-    AdaptStaticArraysExt = "StaticArrays"
-
-    [deps.Adapt.weakdeps]
-    SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
-    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+    Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [[deps.AliasTables]]
 deps = ["PtrArrays", "Random"]
@@ -601,39 +791,11 @@ version = "1.1.3"
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
 version = "1.1.2"
 
-[[deps.ArrayInterface]]
-deps = ["Adapt", "LinearAlgebra"]
-git-tree-sha1 = "d81ae5489e13bc03567d4fbbb06c546a5e53c857"
-uuid = "4fba245c-0d91-5ea0-9b3e-6abc04ee57a9"
-version = "7.22.0"
-
-    [deps.ArrayInterface.extensions]
-    ArrayInterfaceBandedMatricesExt = "BandedMatrices"
-    ArrayInterfaceBlockBandedMatricesExt = "BlockBandedMatrices"
-    ArrayInterfaceCUDAExt = "CUDA"
-    ArrayInterfaceCUDSSExt = ["CUDSS", "CUDA"]
-    ArrayInterfaceChainRulesCoreExt = "ChainRulesCore"
-    ArrayInterfaceChainRulesExt = "ChainRules"
-    ArrayInterfaceGPUArraysCoreExt = "GPUArraysCore"
-    ArrayInterfaceMetalExt = "Metal"
-    ArrayInterfaceReverseDiffExt = "ReverseDiff"
-    ArrayInterfaceSparseArraysExt = "SparseArrays"
-    ArrayInterfaceStaticArraysCoreExt = "StaticArraysCore"
-    ArrayInterfaceTrackerExt = "Tracker"
-
-    [deps.ArrayInterface.weakdeps]
-    BandedMatrices = "aae01518-5342-5314-be14-df237901396f"
-    BlockBandedMatrices = "ffab5731-97b5-5995-9138-79e8c1846df0"
-    CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
-    CUDSS = "45b445bb-4962-46a0-9369-b4df9d0f772e"
-    ChainRules = "082447d4-558c-5d27-93f4-14fc19e9eca2"
-    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
-    GPUArraysCore = "46192b85-c4d5-4398-a991-12ede77f4527"
-    Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
-    ReverseDiff = "37e2e3b7-166d-5795-8a7a-e32c996b4267"
-    SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
-    StaticArraysCore = "1e83bf80-4336-4d27-bf5d-d5a4f845583c"
-    Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
+[[deps.ArnoldiMethod]]
+deps = ["LinearAlgebra", "Random", "StaticArrays"]
+git-tree-sha1 = "d57bd3762d308bded22c3b82d033bff85f6195c6"
+uuid = "ec485272-7323-5ecc-a04f-4719b315124d"
+version = "0.4.0"
 
 [[deps.Artifacts]]
 uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
@@ -654,11 +816,17 @@ git-tree-sha1 = "1b96ea4a01afe0ea4090c5c8039690672dd13f2e"
 uuid = "6e34b625-4abd-537c-b88f-471c36dfa7a0"
 version = "1.0.9+0"
 
+[[deps.Cairo]]
+deps = ["Cairo_jll", "Colors", "Glib_jll", "Graphics", "Libdl", "Pango_jll"]
+git-tree-sha1 = "71aa551c5c33f1a4415867fe06b7844faadb0ae9"
+uuid = "159f3aea-2a34-519c-b102-8c37f9878175"
+version = "1.1.1"
+
 [[deps.Cairo_jll]]
-deps = ["Artifacts", "Bzip2_jll", "CompilerSupportLibraries_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "JLLWrappers", "LZO_jll", "Libdl", "Pixman_jll", "Xorg_libXext_jll", "Xorg_libXrender_jll", "Zlib_jll", "libpng_jll"]
-git-tree-sha1 = "fde3bf89aead2e723284a8ff9cdf5b551ed700e8"
+deps = ["Artifacts", "Bzip2_jll", "CompilerSupportLibraries_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "JLLWrappers", "Libdl", "Pixman_jll", "Xorg_libXext_jll", "Xorg_libXrender_jll", "Zlib_jll", "libpng_jll"]
+git-tree-sha1 = "d0efe2c6fdcdaa1c161d206aa8b933788397ec71"
 uuid = "83423d85-b0ee-5818-9007-b63ccbeb887a"
-version = "1.18.5+0"
+version = "1.18.6+0"
 
 [[deps.CodecZlib]]
 deps = ["TranscodingStreams", "Zlib_jll"]
@@ -687,22 +855,18 @@ deps = ["ColorTypes", "FixedPointNumbers", "LinearAlgebra", "Requires", "Statist
 git-tree-sha1 = "8b3b6f87ce8f65a2b4f857528fd8d70086cd72b1"
 uuid = "c3611d14-8923-5661-9e6a-0046d554d3a4"
 version = "0.11.0"
-weakdeps = ["SpecialFunctions"]
 
     [deps.ColorVectorSpace.extensions]
     SpecialFunctionsExt = "SpecialFunctions"
+
+    [deps.ColorVectorSpace.weakdeps]
+    SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 
 [[deps.Colors]]
 deps = ["ColorTypes", "FixedPointNumbers", "Reexport"]
 git-tree-sha1 = "37ea44092930b1811e666c3bc38065d7d87fcc74"
 uuid = "5ae59095-9a9b-59fe-a467-6f913c188581"
 version = "0.13.1"
-
-[[deps.CommonSubexpressions]]
-deps = ["MacroTools"]
-git-tree-sha1 = "cda2cfaebb4be89c9084adaca7dd7333369715c5"
-uuid = "bbf7d656-a473-5ed7-a52c-81e309532950"
-version = "0.3.1"
 
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
@@ -711,24 +875,9 @@ version = "1.3.0+1"
 
 [[deps.ConcurrentUtilities]]
 deps = ["Serialization", "Sockets"]
-git-tree-sha1 = "d9d26935a0bcffc87d2613ce14c527c99fc543fd"
+git-tree-sha1 = "21d088c496ea22914fe80906eb5bce65755e5ec8"
 uuid = "f0e56b4a-5159-44fe-b623-3e5288b988bb"
-version = "2.5.0"
-
-[[deps.ConstructionBase]]
-git-tree-sha1 = "b4b092499347b18a015186eae3042f72267106cb"
-uuid = "187b0558-2788-49d3-abe0-74a17ed4e7c9"
-version = "1.6.0"
-
-    [deps.ConstructionBase.extensions]
-    ConstructionBaseIntervalSetsExt = "IntervalSets"
-    ConstructionBaseLinearAlgebraExt = "LinearAlgebra"
-    ConstructionBaseStaticArraysExt = "StaticArrays"
-
-    [deps.ConstructionBase.weakdeps]
-    IntervalSets = "8197267c-284f-5f27-9208-e0e47529a953"
-    LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+version = "2.5.1"
 
 [[deps.Contour]]
 git-tree-sha1 = "439e35b0b36e2e5881738abc8857bd92ad6ff9a8"
@@ -742,9 +891,9 @@ version = "1.16.0"
 
 [[deps.DataStructures]]
 deps = ["OrderedCollections"]
-git-tree-sha1 = "e357641bb3e0638d353c4b29ea0e40ea644066a6"
+git-tree-sha1 = "e86f4a2805f7f19bec5129bc9150c38208e5dc23"
 uuid = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
-version = "0.19.3"
+version = "0.19.4"
 
 [[deps.Dates]]
 deps = ["Printf"]
@@ -763,89 +912,6 @@ git-tree-sha1 = "9e2f36d3c96a820c678f2f1f1782582fcf685bae"
 uuid = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 version = "1.9.1"
 
-[[deps.DiffResults]]
-deps = ["StaticArraysCore"]
-git-tree-sha1 = "782dd5f4561f5d267313f23853baaaa4c52ea621"
-uuid = "163ba53b-c6d8-5494-b064-1a9d43ac40c5"
-version = "1.1.0"
-
-[[deps.DiffRules]]
-deps = ["IrrationalConstants", "LogExpFunctions", "NaNMath", "Random", "SpecialFunctions"]
-git-tree-sha1 = "23163d55f885173722d1e4cf0f6110cdbaf7e272"
-uuid = "b552c78f-8df3-52c6-915a-8e097449b14b"
-version = "1.15.1"
-
-[[deps.DifferentiationInterface]]
-deps = ["ADTypes", "LinearAlgebra"]
-git-tree-sha1 = "7ae99144ea44715402c6c882bfef2adbeadbc4ce"
-uuid = "a0c0ee7d-e4b9-4e03-894e-1c5f64a51d63"
-version = "0.7.16"
-
-    [deps.DifferentiationInterface.extensions]
-    DifferentiationInterfaceChainRulesCoreExt = "ChainRulesCore"
-    DifferentiationInterfaceDiffractorExt = "Diffractor"
-    DifferentiationInterfaceEnzymeExt = ["EnzymeCore", "Enzyme"]
-    DifferentiationInterfaceFastDifferentiationExt = "FastDifferentiation"
-    DifferentiationInterfaceFiniteDiffExt = "FiniteDiff"
-    DifferentiationInterfaceFiniteDifferencesExt = "FiniteDifferences"
-    DifferentiationInterfaceForwardDiffExt = ["ForwardDiff", "DiffResults"]
-    DifferentiationInterfaceGPUArraysCoreExt = "GPUArraysCore"
-    DifferentiationInterfaceGTPSAExt = "GTPSA"
-    DifferentiationInterfaceMooncakeExt = "Mooncake"
-    DifferentiationInterfacePolyesterForwardDiffExt = ["PolyesterForwardDiff", "ForwardDiff", "DiffResults"]
-    DifferentiationInterfaceReverseDiffExt = ["ReverseDiff", "DiffResults"]
-    DifferentiationInterfaceSparseArraysExt = "SparseArrays"
-    DifferentiationInterfaceSparseConnectivityTracerExt = "SparseConnectivityTracer"
-    DifferentiationInterfaceSparseMatrixColoringsExt = "SparseMatrixColorings"
-    DifferentiationInterfaceStaticArraysExt = "StaticArrays"
-    DifferentiationInterfaceSymbolicsExt = "Symbolics"
-    DifferentiationInterfaceTrackerExt = "Tracker"
-    DifferentiationInterfaceZygoteExt = ["Zygote", "ForwardDiff"]
-
-    [deps.DifferentiationInterface.weakdeps]
-    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
-    DiffResults = "163ba53b-c6d8-5494-b064-1a9d43ac40c5"
-    Diffractor = "9f5e2b26-1114-432f-b630-d3fe2085c51c"
-    Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
-    EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
-    FastDifferentiation = "eb9bf01b-bf85-4b60-bf87-ee5de06c00be"
-    FiniteDiff = "6a86dc24-6348-571c-b903-95158fe2bd41"
-    FiniteDifferences = "26cc04aa-876d-5657-8c51-4c34ba976000"
-    ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
-    GPUArraysCore = "46192b85-c4d5-4398-a991-12ede77f4527"
-    GTPSA = "b27dd330-f138-47c5-815b-40db9dd9b6e8"
-    Mooncake = "da2b9cff-9c12-43a0-ae48-6db2b0edb7d6"
-    PolyesterForwardDiff = "98d1487c-24ca-40b6-b7ab-df2af84e126b"
-    ReverseDiff = "37e2e3b7-166d-5795-8a7a-e32c996b4267"
-    SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
-    SparseConnectivityTracer = "9f842d2f-2579-4b1d-911e-f412cf18a3f5"
-    SparseMatrixColorings = "0a514795-09f3-496d-8182-132a7b665d35"
-    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
-    Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
-    Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
-    Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
-
-[[deps.Distributed]]
-deps = ["Random", "Serialization", "Sockets"]
-uuid = "8ba89e20-285c-5b6f-9357-94700520ee1b"
-version = "1.11.0"
-
-[[deps.Distributions]]
-deps = ["AliasTables", "FillArrays", "LinearAlgebra", "PDMats", "Printf", "QuadGK", "Random", "SpecialFunctions", "Statistics", "StatsAPI", "StatsBase", "StatsFuns"]
-git-tree-sha1 = "fbcc7610f6d8348428f722ecbe0e6cfe22e672c6"
-uuid = "31c24e10-a181-5473-b8eb-7969acd0382f"
-version = "0.25.123"
-
-    [deps.Distributions.extensions]
-    DistributionsChainRulesCoreExt = "ChainRulesCore"
-    DistributionsDensityInterfaceExt = "DensityInterface"
-    DistributionsTestExt = "Test"
-
-    [deps.Distributions.weakdeps]
-    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
-    DensityInterface = "b429d917-457f-4dbc-8f4c-0cc954292b1d"
-    Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
 [[deps.DocStringExtensions]]
 git-tree-sha1 = "7442a5dfe1ebb773c29cc2962a8980f47221d76c"
 uuid = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
@@ -855,6 +921,12 @@ version = "0.9.5"
 deps = ["ArgTools", "FileWatching", "LibCURL", "NetworkOptions"]
 uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 version = "1.7.0"
+
+[[deps.EarCut_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "e3290f2d49e661fbd94046d7e3726ffcb2d41053"
+uuid = "5ae413db-bbd1-5e63-b57d-d24a61df00f5"
+version = "2.2.4+0"
 
 [[deps.EpollShim_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -874,6 +946,11 @@ git-tree-sha1 = "27af30de8b5445644e8ffe3bcb0d72049c089cf1"
 uuid = "2e619515-83b5-522b-bb60-26c02a35a201"
 version = "2.7.3+0"
 
+[[deps.Extents]]
+git-tree-sha1 = "b309b36a9e02fe7be71270dd8c0fd873625332b4"
+uuid = "411431e0-e8b7-467b-b5e0-f676ba4f2910"
+version = "0.1.6"
+
 [[deps.FFMPEG]]
 deps = ["FFMPEG_jll"]
 git-tree-sha1 = "95ecf07c2eea562b5adbd0696af6db62c0f52560"
@@ -882,49 +959,35 @@ version = "0.4.5"
 
 [[deps.FFMPEG_jll]]
 deps = ["Artifacts", "Bzip2_jll", "FreeType2_jll", "FriBidi_jll", "JLLWrappers", "LAME_jll", "Libdl", "Ogg_jll", "OpenSSL_jll", "Opus_jll", "PCRE2_jll", "Zlib_jll", "libaom_jll", "libass_jll", "libfdk_aac_jll", "libva_jll", "libvorbis_jll", "x264_jll", "x265_jll"]
-git-tree-sha1 = "01ba9d15e9eae375dc1eb9589df76b3572acd3f2"
+git-tree-sha1 = "66381d7059b5f3f6162f28831854008040a4e905"
 uuid = "b22a6f82-2f65-5046-a5b2-351ab43fb4e5"
-version = "8.0.1+0"
+version = "8.0.1+1"
+
+[[deps.FFTW]]
+deps = ["AbstractFFTs", "FFTW_jll", "Libdl", "LinearAlgebra", "MKL_jll", "Preferences", "Reexport"]
+git-tree-sha1 = "97f08406df914023af55ade2f843c39e99c5d969"
+uuid = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+version = "1.10.0"
+
+[[deps.FFTW_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "6d6219a004b8cf1e0b4dbe27a2860b8e04eba0be"
+uuid = "f5851436-0d7a-5f13-b9de-f02708fd171a"
+version = "3.3.11+0"
+
+[[deps.FileIO]]
+deps = ["Pkg", "Requires", "UUIDs"]
+git-tree-sha1 = "6522cfb3b8fe97bec632252263057996cbd3de20"
+uuid = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
+version = "1.18.0"
+weakdeps = ["HTTP"]
+
+    [deps.FileIO.extensions]
+    HTTPExt = "HTTP"
 
 [[deps.FileWatching]]
 uuid = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
 version = "1.11.0"
-
-[[deps.FillArrays]]
-deps = ["LinearAlgebra"]
-git-tree-sha1 = "2f979084d1e13948a3352cf64a25df6bd3b4dca3"
-uuid = "1a297f60-69ca-5386-bcde-b61e274b549b"
-version = "1.16.0"
-
-    [deps.FillArrays.extensions]
-    FillArraysPDMatsExt = "PDMats"
-    FillArraysSparseArraysExt = "SparseArrays"
-    FillArraysStaticArraysExt = "StaticArrays"
-    FillArraysStatisticsExt = "Statistics"
-
-    [deps.FillArrays.weakdeps]
-    PDMats = "90014a1f-27ba-587c-ab20-58faa44d9150"
-    SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
-    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
-    Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
-
-[[deps.FiniteDiff]]
-deps = ["ArrayInterface", "LinearAlgebra", "Setfield"]
-git-tree-sha1 = "9340ca07ca27093ff68418b7558ca37b05f8aeb1"
-uuid = "6a86dc24-6348-571c-b903-95158fe2bd41"
-version = "2.29.0"
-
-    [deps.FiniteDiff.extensions]
-    FiniteDiffBandedMatricesExt = "BandedMatrices"
-    FiniteDiffBlockBandedMatricesExt = "BlockBandedMatrices"
-    FiniteDiffSparseArraysExt = "SparseArrays"
-    FiniteDiffStaticArraysExt = "StaticArrays"
-
-    [deps.FiniteDiff.weakdeps]
-    BandedMatrices = "aae01518-5342-5314-be14-df237901396f"
-    BlockBandedMatrices = "ffab5731-97b5-5995-9138-79e8c1846df0"
-    SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
-    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [[deps.FixedPointNumbers]]
 deps = ["Statistics"]
@@ -943,23 +1006,11 @@ git-tree-sha1 = "9c68794ef81b08086aeb32eeaf33531668d5f5fc"
 uuid = "1fa38f19-a742-5d3f-a2b9-30dd87b9d5f8"
 version = "1.3.7"
 
-[[deps.ForwardDiff]]
-deps = ["CommonSubexpressions", "DiffResults", "DiffRules", "LinearAlgebra", "LogExpFunctions", "NaNMath", "Preferences", "Printf", "Random", "SpecialFunctions"]
-git-tree-sha1 = "eef4c86803f47dcb61e9b8790ecaa96956fdd8ae"
-uuid = "f6369f11-7733-5829-9624-2563aa707210"
-version = "1.3.2"
-
-    [deps.ForwardDiff.extensions]
-    ForwardDiffStaticArraysExt = "StaticArrays"
-
-    [deps.ForwardDiff.weakdeps]
-    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
-
 [[deps.FreeType2_jll]]
 deps = ["Artifacts", "Bzip2_jll", "JLLWrappers", "Libdl", "Zlib_jll"]
-git-tree-sha1 = "2c5512e11c791d1baed2049c5652441b28fc6a31"
+git-tree-sha1 = "70329abc09b886fd2c5d94ad2d9527639c421e3e"
 uuid = "d7e528f0-a631-5988-bf34-fe36492bcfd7"
-version = "2.13.4+0"
+version = "2.14.3+1"
 
 [[deps.FriBidi_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -967,22 +1018,17 @@ git-tree-sha1 = "7a214fdac5ed5f59a22c2d9a885a16da1c74bbc7"
 uuid = "559328eb-81f9-559d-9380-de523a88c83c"
 version = "1.0.17+0"
 
-[[deps.Future]]
-deps = ["Random"]
-uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
-version = "1.11.0"
-
 [[deps.GLFW_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libglvnd_jll", "Xorg_libXcursor_jll", "Xorg_libXi_jll", "Xorg_libXinerama_jll", "Xorg_libXrandr_jll", "libdecor_jll", "xkbcommon_jll"]
-git-tree-sha1 = "b7bfd56fa66616138dfe5237da4dc13bbd83c67f"
+git-tree-sha1 = "9e0fb9e54594c47f278d75063980e43066e26e20"
 uuid = "0656b61e-2033-5cc2-a64a-77c0f6c09b89"
-version = "3.4.1+0"
+version = "3.4.1+1"
 
 [[deps.GR]]
 deps = ["Artifacts", "Base64", "DelimitedFiles", "Downloads", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Preferences", "Printf", "Qt6Wayland_jll", "Random", "Serialization", "Sockets", "TOML", "Tar", "Test", "p7zip_jll"]
-git-tree-sha1 = "ee0585b62671ce88e48d3409733230b401c9775c"
+git-tree-sha1 = "44716a1a667cb867ee0e9ec8edc31c3e4aa5afdc"
 uuid = "28b8d3ca-fb5f-59d9-8090-bfdbd6d07a71"
-version = "0.73.22"
+version = "0.73.24"
 
     [deps.GR.extensions]
     IJuliaExt = "IJulia"
@@ -992,9 +1038,21 @@ version = "0.73.22"
 
 [[deps.GR_jll]]
 deps = ["Artifacts", "Bzip2_jll", "Cairo_jll", "FFMPEG_jll", "Fontconfig_jll", "FreeType2_jll", "GLFW_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Pixman_jll", "Qt6Base_jll", "Zlib_jll", "libpng_jll"]
-git-tree-sha1 = "7dd7173f7129a1b6f84e0f03e0890cd1189b0659"
+git-tree-sha1 = "be8a1b8065959e24fdc1b51402f39f3b6f0f6653"
 uuid = "d2c73de3-f751-5644-a686-071e5b155ba9"
-version = "0.73.22+0"
+version = "0.73.24+0"
+
+[[deps.GeometryBasics]]
+deps = ["EarCut_jll", "Extents", "IterTools", "LinearAlgebra", "PrecompileTools", "Random", "StaticArrays"]
+git-tree-sha1 = "1f5a80f4ed9f5a4aada88fc2db456e637676414b"
+uuid = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
+version = "0.5.10"
+
+    [deps.GeometryBasics.extensions]
+    GeometryBasicsGeoInterfaceExt = "GeoInterface"
+
+    [deps.GeometryBasics.weakdeps]
+    GeoInterface = "cf35fbd7-0cd7-5166-be24-54bfbe79505f"
 
 [[deps.GettextRuntime_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Libiconv_jll"]
@@ -1010,15 +1068,34 @@ version = "9.55.1+0"
 
 [[deps.Glib_jll]]
 deps = ["Artifacts", "GettextRuntime_jll", "JLLWrappers", "Libdl", "Libffi_jll", "Libiconv_jll", "Libmount_jll", "PCRE2_jll", "Zlib_jll"]
-git-tree-sha1 = "6b4d2dc81736fe3980ff0e8879a9fc7c33c44ddf"
+git-tree-sha1 = "24f6def62397474a297bfcec22384101609142ed"
 uuid = "7746bdde-850d-59dc-9ae8-88ece973131d"
-version = "2.86.2+0"
+version = "2.86.3+0"
+
+[[deps.Graphics]]
+deps = ["Colors", "LinearAlgebra", "NaNMath"]
+git-tree-sha1 = "a641238db938fff9b2f60d08ed9030387daf428c"
+uuid = "a2bd30eb-e257-5431-a919-1863eab51364"
+version = "1.1.3"
 
 [[deps.Graphite2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "8a6dbda1fd736d60cc477d99f2e7a042acfa46e8"
 uuid = "3b182d85-2403-5c21-9c21-1e1f0cc25472"
 version = "1.3.15+0"
+
+[[deps.Graphs]]
+deps = ["ArnoldiMethod", "DataStructures", "Inflate", "LinearAlgebra", "Random", "SimpleTraits", "SparseArrays", "Statistics"]
+git-tree-sha1 = "031d63d09bd3e6e319df66bb466f5c3e8d147bee"
+uuid = "86223c79-3864-5bf0-83f7-82e725a168b6"
+version = "1.13.4"
+
+    [deps.Graphs.extensions]
+    GraphsSharedArraysExt = "SharedArrays"
+
+    [deps.Graphs.weakdeps]
+    Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+    SharedArrays = "1a1011a3-84de-559e-8e89-a11a2f7dc383"
 
 [[deps.Grisu]]
 git-tree-sha1 = "53bb909d1151e57e2484c3d1b53e19552b887fb2"
@@ -1027,9 +1104,9 @@ version = "1.0.2"
 
 [[deps.HTTP]]
 deps = ["Base64", "CodecZlib", "ConcurrentUtilities", "Dates", "ExceptionUnwrapping", "Logging", "LoggingExtras", "MbedTLS", "NetworkOptions", "OpenSSL", "PrecompileTools", "Random", "SimpleBufferStream", "Sockets", "URIs", "UUIDs"]
-git-tree-sha1 = "5e6fe50ae7f23d171f44e311c2960294aaa0beb5"
+git-tree-sha1 = "51059d23c8bb67911a2e6fd5130229113735fc7e"
 uuid = "cd3eb016-35fb-5094-929b-558a96fad6f3"
-version = "1.10.19"
+version = "1.11.0"
 
 [[deps.HarfBuzz_jll]]
 deps = ["Artifacts", "Cairo_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "Graphite2_jll", "JLLWrappers", "Libdl", "Libffi_jll"]
@@ -1037,29 +1114,16 @@ git-tree-sha1 = "f923f9a774fcf3f5cb761bfa43aeadd689714813"
 uuid = "2e76f6c2-a576-52d4-95c1-20adfe4de566"
 version = "8.5.1+0"
 
-[[deps.HypergeometricFunctions]]
-deps = ["LinearAlgebra", "OpenLibm_jll", "SpecialFunctions"]
-git-tree-sha1 = "68c173f4f449de5b438ee67ed0c9c748dc31a2ec"
-uuid = "34004b35-14d8-5ef3-9330-4cdb6864b03a"
-version = "0.3.28"
+[[deps.Inflate]]
+git-tree-sha1 = "d1b1b796e47d94588b3757fe84fbf65a5ec4a80d"
+uuid = "d25df0c9-e2be-5dd7-82c8-3ad0b3e990b9"
+version = "0.1.5"
 
-[[deps.Hyperscript]]
-deps = ["Test"]
-git-tree-sha1 = "179267cfa5e712760cd43dcae385d7ea90cc25a4"
-uuid = "47d2ed2b-36de-50cf-bf87-49c2cf4b8b91"
-version = "0.0.5"
-
-[[deps.HypertextLiteral]]
-deps = ["Tricks"]
-git-tree-sha1 = "7134810b1afce04bbc1045ca1985fbe81ce17653"
-uuid = "ac1192a8-f4b3-4bfe-ba22-af5b92cd3ab2"
-version = "0.9.5"
-
-[[deps.IOCapture]]
-deps = ["Logging", "Random"]
-git-tree-sha1 = "0ee181ec08df7d7c911901ea38baf16f755114dc"
-uuid = "b5f81e59-6552-4d32-b1f0-c071b021bf89"
-version = "1.0.0"
+[[deps.IntelOpenMP_jll]]
+deps = ["Artifacts", "JLLWrappers", "LazyArtifacts", "Libdl"]
+git-tree-sha1 = "ec1debd61c300961f98064cfb21287613ad7f303"
+uuid = "1d5cc7b8-4909-519e-a0f8-d0f5ad9712d0"
+version = "2025.2.0+0"
 
 [[deps.InteractiveUtils]]
 deps = ["Markdown"]
@@ -1070,6 +1134,11 @@ version = "1.11.0"
 git-tree-sha1 = "b2d91fe939cae05960e760110b328288867b5758"
 uuid = "92d709cd-6900-40b7-9082-c6be49f344b6"
 version = "0.2.6"
+
+[[deps.IterTools]]
+git-tree-sha1 = "42d5f897009e7ff2cf88db414a389e5ed1bdd023"
+uuid = "c8e1da08-722c-5040-9ed9-7db0dc04731e"
+version = "1.10.0"
 
 [[deps.JLFzf]]
 deps = ["REPL", "Random", "fzf_jll"]
@@ -1085,9 +1154,9 @@ version = "1.7.1"
 
 [[deps.JSON]]
 deps = ["Dates", "Logging", "Parsers", "PrecompileTools", "StructUtils", "UUIDs", "Unicode"]
-git-tree-sha1 = "b3ad4a0255688dcb895a52fafbaae3023b588a90"
+git-tree-sha1 = "67c6f1f085cb2671c93fe34244c9cccde30f7a26"
 uuid = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
-version = "1.4.0"
+version = "1.5.0"
 
     [deps.JSON.extensions]
     JSONArrowExt = ["ArrowTypes"]
@@ -1097,14 +1166,20 @@ version = "1.4.0"
 
 [[deps.JpegTurbo_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "b6893345fd6658c8e475d40155789f4860ac3b21"
+git-tree-sha1 = "c0c9b76f3520863909825cbecdef58cd63de705a"
 uuid = "aacddb02-875f-59d6-b918-886e6ef4fbf8"
-version = "3.1.4+0"
+version = "3.1.5+0"
 
 [[deps.JuliaSyntaxHighlighting]]
 deps = ["StyledStrings"]
 uuid = "ac6e5ff7-fb65-4e79-a425-ec3bc9c03011"
 version = "1.12.0"
+
+[[deps.Karnak]]
+deps = ["Colors", "Graphs", "InteractiveUtils", "Luxor", "NetworkLayout", "Reexport", "SimpleWeightedGraphs"]
+git-tree-sha1 = "14b4c3f33e75719d697c7e4845f13fb5b3772104"
+uuid = "cd156443-31ad-4f6f-850f-a93ee5f75905"
+version = "1.2.0"
 
 [[deps.LAME_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -1114,21 +1189,15 @@ version = "3.100.3+0"
 
 [[deps.LERC_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "aaafe88dccbd957a8d82f7d05be9b69172e0cee3"
+git-tree-sha1 = "17b94ecafcfa45e8360a4fc9ca6b583b049e4e37"
 uuid = "88015f11-f218-50d7-93a8-a6af411a945d"
-version = "4.0.1+0"
+version = "4.1.0+0"
 
 [[deps.LLVMOpenMP_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "eb62a3deb62fc6d8822c0c4bef73e4412419c5d8"
 uuid = "1d63c593-3942-5779-bab2-d838dc0a180e"
 version = "18.1.8+0"
-
-[[deps.LZO_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "1c602b1127f4751facb671441ca72715cc95938a"
-uuid = "dd4b983a-f0e5-5f8d-a1b7-129d4a5fb1ac"
-version = "2.10.3+0"
 
 [[deps.LaTeXStrings]]
 git-tree-sha1 = "dda21b8cbd6a6c40d9d02a73230f9d70fed6918c"
@@ -1152,6 +1221,11 @@ version = "0.16.10"
     SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
     SymEngine = "123dc426-2d89-5057-bbad-38513e3affd8"
     tectonic_jll = "d7dd28d6-a5e6-559c-9131-7eb760cdacc5"
+
+[[deps.LazyArtifacts]]
+deps = ["Artifacts", "Pkg"]
+uuid = "4af54fe1-eca0-43a8-85a7-787d91b784e3"
+version = "1.11.0"
 
 [[deps.LibCURL]]
 deps = ["LibCURL_jll", "MozillaCACerts_jll"]
@@ -1202,9 +1276,15 @@ version = "1.18.0+0"
 
 [[deps.Libmount_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "3acf07f130a76f87c041cfb2ff7d7284ca67b072"
+git-tree-sha1 = "cc3ad4faf30015a3e8094c9b5b7f19e85bdf2386"
 uuid = "4b2f31a3-9ecc-558c-b454-b3730dcb73e9"
-version = "2.41.2+0"
+version = "2.42.0+0"
+
+[[deps.Librsvg_jll]]
+deps = ["Artifacts", "Cairo_jll", "FreeType2_jll", "Glib_jll", "JLLWrappers", "Libdl", "Pango_jll", "XML2_jll", "gdk_pixbuf_jll"]
+git-tree-sha1 = "e6ab5dda9916d7041356371c53cdc00b39841c31"
+uuid = "925c91fb-5dd6-59dd-8e8c-345e74382d89"
+version = "2.54.7+0"
 
 [[deps.Libtiff_jll]]
 deps = ["Artifacts", "JLLWrappers", "JpegTurbo_jll", "LERC_jll", "Libdl", "XZ_jll", "Zlib_jll", "Zstd_jll"]
@@ -1214,9 +1294,9 @@ version = "4.7.2+0"
 
 [[deps.Libuuid_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "2a7a12fc0a4e7fb773450d17975322aa77142106"
+git-tree-sha1 = "d620582b1f0cbe2c72dd1d5bd195a9ce73370ab1"
 uuid = "38a345b3-de98-5d2b-a5d3-14cd9215e700"
-version = "2.41.2+0"
+version = "2.42.0+0"
 
 [[deps.LinearAlgebra]]
 deps = ["Libdl", "OpenBLAS_jll", "libblastrampoline_jll"]
@@ -1249,16 +1329,26 @@ git-tree-sha1 = "f00544d95982ea270145636c181ceda21c4e2575"
 uuid = "e6f89c97-d47a-5376-807f-9c37f3926c36"
 version = "1.2.0"
 
-[[deps.LsqFit]]
-deps = ["Distributions", "ForwardDiff", "LinearAlgebra", "NLSolversBase", "Printf", "StatsAPI"]
-git-tree-sha1 = "f386224fa41af0c27f45e2f9a8f323e538143b43"
-uuid = "2fda8390-95c7-5789-9bda-21331edee243"
-version = "0.15.1"
+[[deps.Luxor]]
+deps = ["Base64", "Cairo", "Colors", "DataStructures", "Dates", "FFMPEG", "FileIO", "PolygonAlgorithms", "PrecompileTools", "Random", "Rsvg"]
+git-tree-sha1 = "fe8060b3d693f682e14f1019b058c64effb62b43"
+uuid = "ae8d54c2-7ccd-5906-9d76-62fc9837b5bc"
+version = "4.5.0"
 
-[[deps.MIMEs]]
-git-tree-sha1 = "c64d943587f7187e751162b3b84445bbbd79f691"
-uuid = "6c6e2e6c-3030-632d-7369-2d6c69616d65"
-version = "1.1.0"
+    [deps.Luxor.extensions]
+    LuxorExtLatex = ["LaTeXStrings", "MathTeXEngine"]
+    LuxorExtTypstry = ["Typstry"]
+
+    [deps.Luxor.weakdeps]
+    LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
+    MathTeXEngine = "0a4f8689-d25c-4efe-a92b-7142dfc1aa53"
+    Typstry = "f0ed7684-a786-439e-b1e3-3b82803b501e"
+
+[[deps.MKL_jll]]
+deps = ["Artifacts", "IntelOpenMP_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "oneTBB_jll"]
+git-tree-sha1 = "282cadc186e7b2ae0eeadbd7a4dffed4196ae2aa"
+uuid = "856f044c-d86e-5d09-b602-aeab76dc8ba7"
+version = "2025.2.0+0"
 
 [[deps.MacroTools]]
 git-tree-sha1 = "1e0228a030642014fe5cfe68c2c0a818f9e3f522"
@@ -1272,9 +1362,9 @@ version = "1.11.0"
 
 [[deps.MbedTLS]]
 deps = ["Dates", "MbedTLS_jll", "MozillaCACerts_jll", "NetworkOptions", "Random", "Sockets"]
-git-tree-sha1 = "c067a280ddc25f196b5e7df3877c6b226d390aaf"
+git-tree-sha1 = "8785729fa736197687541f7053f6d8ab7fc44f92"
 uuid = "739be429-bea8-5141-9913-cc70e7f3736d"
-version = "1.1.9"
+version = "1.1.10"
 
 [[deps.MbedTLS_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -1301,17 +1391,21 @@ version = "1.11.0"
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
 version = "2025.11.4"
 
-[[deps.NLSolversBase]]
-deps = ["ADTypes", "DifferentiationInterface", "Distributed", "FiniteDiff", "ForwardDiff"]
-git-tree-sha1 = "25a6638571a902ecfb1ae2a18fc1575f86b1d4df"
-uuid = "d41bc354-129a-5804-8e4c-c37616107c6c"
-version = "7.10.0"
-
 [[deps.NaNMath]]
 deps = ["OpenLibm_jll"]
 git-tree-sha1 = "9b8215b1ee9e78a293f99797cd31375471b2bcae"
 uuid = "77ba4419-2d1f-58cd-9bb1-8ffee604a2e3"
 version = "1.1.3"
+
+[[deps.NetworkLayout]]
+deps = ["GeometryBasics", "LinearAlgebra", "Random", "Requires", "StaticArrays"]
+git-tree-sha1 = "f7466c23a7c5029dc99e8358e7ce5d81a117c364"
+uuid = "46757867-2c16-5918-afeb-47bfcb05e46a"
+version = "0.4.10"
+weakdeps = ["Graphs"]
+
+    [deps.NetworkLayout.extensions]
+    NetworkLayoutGraphsExt = "Graphs"
 
 [[deps.NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
@@ -1344,17 +1438,11 @@ deps = ["Artifacts", "Libdl"]
 uuid = "458c3c95-2e84-50aa-8efc-19380b2a3a95"
 version = "3.5.4+0"
 
-[[deps.OpenSpecFun_jll]]
-deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "1346c9208249809840c91b26703912dff463d335"
-uuid = "efe28fd5-8261-553b-a9e1-b2916fc3738e"
-version = "0.5.6+0"
-
 [[deps.Opus_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "39a11854f0cba27aa41efaedf43c77c5daa6be51"
+git-tree-sha1 = "e2bb57a313a74b8104064b7efd01406c0a50d2ff"
 uuid = "91d4177d-7536-5919-b921-800302f37372"
-version = "1.6.0+0"
+version = "1.6.1+0"
 
 [[deps.OrderedCollections]]
 git-tree-sha1 = "05868e21324cede2207c6f0f466b4bfef6d5e7ee"
@@ -1366,21 +1454,11 @@ deps = ["Artifacts", "Libdl"]
 uuid = "efcefdf7-47ab-520b-bdef-62a2eaa19f15"
 version = "10.44.0+1"
 
-[[deps.PDMats]]
-deps = ["LinearAlgebra", "SparseArrays", "SuiteSparse"]
-git-tree-sha1 = "e4cff168707d441cd6bf3ff7e4832bdf34278e4a"
-uuid = "90014a1f-27ba-587c-ab20-58faa44d9150"
-version = "0.11.37"
-weakdeps = ["StatsBase"]
-
-    [deps.PDMats.extensions]
-    StatsBaseExt = "StatsBase"
-
 [[deps.Pango_jll]]
 deps = ["Artifacts", "Cairo_jll", "Fontconfig_jll", "FreeType2_jll", "FriBidi_jll", "Glib_jll", "HarfBuzz_jll", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "0662b083e11420952f2e62e17eddae7fc07d5997"
+git-tree-sha1 = "58e5ed5e386e156bd93e86b305ebd21ac63d2d04"
 uuid = "36c8627f-9965-5494-a995-c6b170f724f3"
-version = "1.57.0+0"
+version = "1.57.1+0"
 
 [[deps.Parsers]]
 deps = ["Dates", "PrecompileTools", "UUIDs"]
@@ -1417,9 +1495,9 @@ version = "1.4.4"
 
 [[deps.Plots]]
 deps = ["Base64", "Contour", "Dates", "Downloads", "FFMPEG", "FixedPointNumbers", "GR", "JLFzf", "JSON", "LaTeXStrings", "Latexify", "LinearAlgebra", "Measures", "NaNMath", "Pkg", "PlotThemes", "PlotUtils", "PrecompileTools", "Printf", "REPL", "Random", "RecipesBase", "RecipesPipeline", "Reexport", "RelocatableFolders", "Requires", "Scratch", "Showoff", "SparseArrays", "Statistics", "StatsBase", "TOML", "UUIDs", "UnicodeFun", "Unzip"]
-git-tree-sha1 = "063ef757a1e0e15af77bbe92be92da672793fd4e"
+git-tree-sha1 = "cb20a4eacda080e517e4deb9cfb6c7c518131265"
 uuid = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
-version = "1.41.4"
+version = "1.41.6"
 
     [deps.Plots.extensions]
     FileIOExt = "FileIO"
@@ -1435,11 +1513,10 @@ version = "1.41.4"
     ImageInTerminal = "d8c32880-2388-543b-8c61-d9f865259254"
     Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 
-[[deps.PlutoUI]]
-deps = ["AbstractPlutoDingetjes", "Base64", "ColorTypes", "Dates", "Downloads", "FixedPointNumbers", "Hyperscript", "HypertextLiteral", "IOCapture", "InteractiveUtils", "Logging", "MIMEs", "Markdown", "Random", "Reexport", "URIs", "UUIDs"]
-git-tree-sha1 = "3ac7038a98ef6977d44adeadc73cc6f596c08109"
-uuid = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
-version = "0.7.79"
+[[deps.PolygonAlgorithms]]
+git-tree-sha1 = "c1092ada65e6d59d6361d5086ddb0a5ea63ae204"
+uuid = "32a0d02f-32d9-4438-b5ed-3a2932b48f96"
+version = "0.4.0"
 
 [[deps.PrecompileTools]]
 deps = ["Preferences"]
@@ -1449,9 +1526,9 @@ version = "1.3.3"
 
 [[deps.Preferences]]
 deps = ["TOML"]
-git-tree-sha1 = "522f093a29b31a93e34eaea17ba055d850edea28"
+git-tree-sha1 = "8b770b60760d4451834fe79dd483e318eee709c4"
 uuid = "21216c6a-2e73-6563-6e65-726566657250"
-version = "1.5.1"
+version = "1.5.2"
 
 [[deps.Printf]]
 deps = ["Unicode"]
@@ -1459,45 +1536,39 @@ uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 version = "1.11.0"
 
 [[deps.PtrArrays]]
-git-tree-sha1 = "1d36ef11a9aaf1e8b74dacc6a731dd1de8fd493d"
+git-tree-sha1 = "4fbbafbc6251b883f4d2705356f3641f3652a7fe"
 uuid = "43287f4e-b6f4-7ad1-bb20-aadabca52c3d"
-version = "1.3.0"
+version = "1.4.0"
 
 [[deps.Qt6Base_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Fontconfig_jll", "Glib_jll", "JLLWrappers", "Libdl", "Libglvnd_jll", "OpenSSL_jll", "Vulkan_Loader_jll", "Xorg_libSM_jll", "Xorg_libXext_jll", "Xorg_libXrender_jll", "Xorg_libxcb_jll", "Xorg_xcb_util_cursor_jll", "Xorg_xcb_util_image_jll", "Xorg_xcb_util_keysyms_jll", "Xorg_xcb_util_renderutil_jll", "Xorg_xcb_util_wm_jll", "Zlib_jll", "libinput_jll", "xkbcommon_jll"]
-git-tree-sha1 = "34f7e5d2861083ec7596af8b8c092531facf2192"
+git-tree-sha1 = "d7a4bff94f42208ce3cf6bc8e4e7d1d663e7ee8b"
 uuid = "c0090381-4147-56d7-9ebc-da0b1113ec56"
-version = "6.8.2+2"
+version = "6.10.2+1"
 
 [[deps.Qt6Declarative_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Qt6Base_jll", "Qt6ShaderTools_jll"]
-git-tree-sha1 = "da7adf145cce0d44e892626e647f9dcbe9cb3e10"
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Qt6Base_jll", "Qt6ShaderTools_jll", "Qt6Svg_jll"]
+git-tree-sha1 = "d5b7dd0e226774cbd87e2790e34def09245c7eab"
 uuid = "629bc702-f1f5-5709-abd5-49b8460ea067"
-version = "6.8.2+1"
+version = "6.10.2+1"
 
 [[deps.Qt6ShaderTools_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Qt6Base_jll"]
-git-tree-sha1 = "9eca9fc3fe515d619ce004c83c31ffd3f85c7ccf"
+git-tree-sha1 = "4d85eedf69d875982c46643f6b4f66919d7e157b"
 uuid = "ce943373-25bb-56aa-8eca-768745ed7b5a"
-version = "6.8.2+1"
+version = "6.10.2+1"
+
+[[deps.Qt6Svg_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Qt6Base_jll"]
+git-tree-sha1 = "81587ff5ff25a4e1115ce191e36285ede0334c9d"
+uuid = "6de9746b-f93d-5813-b365-ba18ad4a9cf3"
+version = "6.10.2+0"
 
 [[deps.Qt6Wayland_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Qt6Base_jll", "Qt6Declarative_jll"]
-git-tree-sha1 = "8f528b0851b5b7025032818eb5abbeb8a736f853"
+git-tree-sha1 = "672c938b4b4e3e0169a07a5f227029d4905456f2"
 uuid = "e99dba38-086e-5de3-a5b1-6e4c66e897c3"
-version = "6.8.2+2"
-
-[[deps.QuadGK]]
-deps = ["DataStructures", "LinearAlgebra"]
-git-tree-sha1 = "9da16da70037ba9d701192e27befedefb91ec284"
-uuid = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
-version = "2.11.2"
-
-    [deps.QuadGK.extensions]
-    QuadGKEnzymeExt = "Enzyme"
-
-    [deps.QuadGK.weakdeps]
-    Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
+version = "6.10.2+1"
 
 [[deps.REPL]]
 deps = ["InteractiveUtils", "JuliaSyntaxHighlighting", "Markdown", "Sockets", "StyledStrings", "Unicode"]
@@ -1538,17 +1609,11 @@ git-tree-sha1 = "62389eeff14780bfe55195b7204c0d8738436d64"
 uuid = "ae029012-a4dd-5104-9daa-d747884805df"
 version = "1.3.1"
 
-[[deps.Rmath]]
-deps = ["Random", "Rmath_jll"]
-git-tree-sha1 = "5b3d50eb374cea306873b371d3f8d3915a018f0b"
-uuid = "79098fc4-a85e-5d69-aa6a-4863f24498fa"
-version = "0.9.0"
-
-[[deps.Rmath_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "58cdd8fb2201a6267e1db87ff148dd6c1dbd8ad8"
-uuid = "f50d1b31-88e8-58de-be2c-1cc44531875f"
-version = "0.5.1+0"
+[[deps.Rsvg]]
+deps = ["Cairo", "Glib_jll", "Librsvg_jll"]
+git-tree-sha1 = "e53dad0507631c0b8d5d946d93458cbabd0f05d7"
+uuid = "c4c386cf-5103-5370-be45-f3a111cca3b8"
+version = "1.1.0"
 
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
@@ -1564,12 +1629,6 @@ version = "1.3.0"
 uuid = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
 version = "1.11.0"
 
-[[deps.Setfield]]
-deps = ["ConstructionBase", "Future", "MacroTools", "StaticArraysCore"]
-git-tree-sha1 = "c5391c6ace3bc430ca630251d02ea9687169ca68"
-uuid = "efcf1570-3423-57d1-acb7-fd33fddbac46"
-version = "1.1.2"
-
 [[deps.Showoff]]
 deps = ["Dates", "Grisu"]
 git-tree-sha1 = "91eddf657aca81df9ae6ceb20b959ae5653ad1de"
@@ -1580,6 +1639,18 @@ version = "1.0.3"
 git-tree-sha1 = "f305871d2f381d21527c770d4788c06c097c9bc1"
 uuid = "777ac1f9-54b0-4bf8-805c-2214025038e7"
 version = "1.2.0"
+
+[[deps.SimpleTraits]]
+deps = ["InteractiveUtils", "MacroTools"]
+git-tree-sha1 = "be8eeac05ec97d379347584fa9fe2f5f76795bcb"
+uuid = "699a6c99-e7fa-54fc-8d76-47d257e15c1d"
+version = "0.9.5"
+
+[[deps.SimpleWeightedGraphs]]
+deps = ["Graphs", "LinearAlgebra", "Markdown", "SparseArrays"]
+git-tree-sha1 = "749a2b719ec7f34f280c0d97ac3dab5c89818631"
+uuid = "47aef6b3-ad0c-573a-a1e2-d07658019622"
+version = "1.5.1"
 
 [[deps.Sockets]]
 uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
@@ -1596,23 +1667,25 @@ deps = ["Libdl", "LinearAlgebra", "Random", "Serialization", "SuiteSparse_jll"]
 uuid = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 version = "1.12.0"
 
-[[deps.SpecialFunctions]]
-deps = ["IrrationalConstants", "LogExpFunctions", "OpenLibm_jll", "OpenSpecFun_jll"]
-git-tree-sha1 = "5acc6a41b3082920f79ca3c759acbcecf18a8d78"
-uuid = "276daf66-3868-5448-9aa4-cd146d93841b"
-version = "2.7.1"
-
-    [deps.SpecialFunctions.extensions]
-    SpecialFunctionsChainRulesCoreExt = "ChainRulesCore"
-
-    [deps.SpecialFunctions.weakdeps]
-    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
-
 [[deps.StableRNGs]]
 deps = ["Random"]
 git-tree-sha1 = "4f96c596b8c8258cc7d3b19797854d368f243ddc"
 uuid = "860ef19b-820b-49d6-a774-d7a799459cd3"
 version = "1.0.4"
+
+[[deps.StaticArrays]]
+deps = ["LinearAlgebra", "PrecompileTools", "Random", "StaticArraysCore"]
+git-tree-sha1 = "246a8bb2e6667f832eea063c3a56aef96429a3db"
+uuid = "90137ffa-7385-5640-81b9-e52037218182"
+version = "1.9.18"
+
+    [deps.StaticArrays.extensions]
+    StaticArraysChainRulesCoreExt = "ChainRulesCore"
+    StaticArraysStatisticsExt = "Statistics"
+
+    [deps.StaticArrays.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [[deps.StaticArraysCore]]
 git-tree-sha1 = "6ab403037779dae8c514bad259f32a447262455a"
@@ -1641,41 +1714,25 @@ git-tree-sha1 = "aceda6f4e598d331548e04cc6b2124a6148138e3"
 uuid = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 version = "0.34.10"
 
-[[deps.StatsFuns]]
-deps = ["HypergeometricFunctions", "IrrationalConstants", "LogExpFunctions", "Reexport", "Rmath", "SpecialFunctions"]
-git-tree-sha1 = "91f091a8716a6bb38417a6e6f274602a19aaa685"
-uuid = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
-version = "1.5.2"
-
-    [deps.StatsFuns.extensions]
-    StatsFunsChainRulesCoreExt = "ChainRulesCore"
-    StatsFunsInverseFunctionsExt = "InverseFunctions"
-
-    [deps.StatsFuns.weakdeps]
-    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
-    InverseFunctions = "3587e190-3f89-42d0-90ee-14403ec27112"
-
 [[deps.StructUtils]]
 deps = ["Dates", "UUIDs"]
-git-tree-sha1 = "9297459be9e338e546f5c4bedb59b3b5674da7f1"
+git-tree-sha1 = "fa95b3b097bcef5845c142ea2e085f1b2591e92c"
 uuid = "ec057cc2-7a8d-4b58-b3b3-92acb9f63b42"
-version = "2.6.2"
+version = "2.7.1"
 
     [deps.StructUtils.extensions]
     StructUtilsMeasurementsExt = ["Measurements"]
+    StructUtilsStaticArraysCoreExt = ["StaticArraysCore"]
     StructUtilsTablesExt = ["Tables"]
 
     [deps.StructUtils.weakdeps]
     Measurements = "eff96d63-e80a-5855-80a2-b1b0885c5ab7"
+    StaticArraysCore = "1e83bf80-4336-4d27-bf5d-d5a4f845583c"
     Tables = "bd369af6-aec1-5ad0-b16a-f7cc5008161c"
 
 [[deps.StyledStrings]]
 uuid = "f489334b-da3d-4c2e-b8f0-e476e12c162b"
 version = "1.11.0"
-
-[[deps.SuiteSparse]]
-deps = ["Libdl", "LinearAlgebra", "Serialization", "SparseArrays"]
-uuid = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
 
 [[deps.SuiteSparse_jll]]
 deps = ["Artifacts", "Libdl", "libblastrampoline_jll"]
@@ -1707,11 +1764,6 @@ version = "1.11.0"
 git-tree-sha1 = "0c45878dcfdcfa8480052b6ab162cdd138781742"
 uuid = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
 version = "0.11.3"
-
-[[deps.Tricks]]
-git-tree-sha1 = "311349fd1c93a31f783f977a71e8b062a57d4101"
-uuid = "410a4b4d-49e4-4fbc-ab6d-cb71b17b3775"
-version = "0.1.13"
 
 [[deps.URIs]]
 git-tree-sha1 = "bef26fb046d031353ef97a82e3fdb6afe7f21b1a"
@@ -1750,11 +1802,17 @@ git-tree-sha1 = "96478df35bbc2f3e1e791bc7a3d0eeee559e60e9"
 uuid = "a2964d1f-97da-50d4-b82a-358c7fce9d89"
 version = "1.24.0+0"
 
+[[deps.XML2_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Libiconv_jll", "Zlib_jll"]
+git-tree-sha1 = "80d3930c6347cfce7ccf96bd3bafdf079d9c0390"
+uuid = "02c8fc9c-b97f-50b9-bbe4-9be30ff0a78a"
+version = "2.13.9+0"
+
 [[deps.XZ_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "9cce64c0fdd1960b597ba7ecda2950b5ed957438"
+git-tree-sha1 = "b29c22e245d092b8b4e8d3c09ad7baa586d9f573"
 uuid = "ffd25f8a-64ca-5728-b0f7-c24cf3aae800"
-version = "5.8.2+0"
+version = "5.8.3+0"
 
 [[deps.Xorg_libICE_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -1770,9 +1828,9 @@ version = "1.2.6+0"
 
 [[deps.Xorg_libX11_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_libxcb_jll", "Xorg_xtrans_jll"]
-git-tree-sha1 = "b5899b25d17bf1889d25906fb9deed5da0c15b3b"
+git-tree-sha1 = "808090ede1d41644447dd5cbafced4731c56bd2f"
 uuid = "4f6342f7-b3d2-589e-9d20-edeb45f2b2bc"
-version = "1.8.12+0"
+version = "1.8.13+0"
 
 [[deps.Xorg_libXau_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -1794,9 +1852,9 @@ version = "1.1.6+0"
 
 [[deps.Xorg_libXext_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_libX11_jll"]
-git-tree-sha1 = "a4c0ee07ad36bf8bbce1c3bb52d21fb1e0b987fb"
+git-tree-sha1 = "1a4a26870bf1e5d26cd585e38038d399d7e65706"
 uuid = "1082639a-0dae-5f34-9b06-72781eeb8cb3"
-version = "1.3.7+0"
+version = "1.3.8+0"
 
 [[deps.Xorg_libXfixes_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_libX11_jll"]
@@ -1812,15 +1870,15 @@ version = "1.8.3+0"
 
 [[deps.Xorg_libXinerama_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_libXext_jll"]
-git-tree-sha1 = "a5bc75478d323358a90dc36766f3c99ba7feb024"
+git-tree-sha1 = "0ba01bc7396896a4ace8aab67db31403c71628f4"
 uuid = "d1454406-59df-5ea1-beac-c340f2130bc3"
-version = "1.1.6+0"
+version = "1.1.7+0"
 
 [[deps.Xorg_libXrandr_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_libXext_jll", "Xorg_libXrender_jll"]
-git-tree-sha1 = "aff463c82a773cb86061bce8d53a0d976854923e"
+git-tree-sha1 = "6c174ef70c96c76f4c3f4d3cfbe09d018bcd1b53"
 uuid = "ec84b674-ba8e-5d96-8ba1-2a689ba10484"
-version = "1.5.5+0"
+version = "1.5.6+0"
 
 [[deps.Xorg_libXrender_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_libX11_jll"]
@@ -1842,9 +1900,9 @@ version = "1.17.1+0"
 
 [[deps.Xorg_libxkbfile_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_libX11_jll"]
-git-tree-sha1 = "e3150c7400c41e207012b41659591f083f3ef795"
+git-tree-sha1 = "ed756a03e95fff88d8f738ebc2849431bdd4fd1a"
 uuid = "cc61e674-0454-545c-8b26-ed2c68acab7a"
-version = "1.1.3+0"
+version = "1.2.0+0"
 
 [[deps.Xorg_xcb_util_cursor_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_xcb_util_image_jll", "Xorg_xcb_util_jll", "Xorg_xcb_util_renderutil_jll"]
@@ -1923,11 +1981,17 @@ git-tree-sha1 = "b6a34e0e0960190ac2a4363a1bd003504772d631"
 uuid = "214eeab7-80f7-51ab-84ad-2988db7cef09"
 version = "0.61.1+0"
 
+[[deps.gdk_pixbuf_jll]]
+deps = ["Artifacts", "Glib_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Xorg_libX11_jll", "libpng_jll"]
+git-tree-sha1 = "895f21b699121d1a57ecac57e65a852caf569254"
+uuid = "da03df04-f53b-5353-a52f-6a8b0620ced0"
+version = "2.42.13+0"
+
 [[deps.libaom_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "371cc681c00a3ccc3fbc5c0fb91f58ba9bec1ecf"
+git-tree-sha1 = "850b06095ee71f0135d644ffd8a52850699581ed"
 uuid = "a4ae2306-e953-59d6-aa16-d00cac43593b"
-version = "3.13.1+0"
+version = "3.13.3+0"
 
 [[deps.libass_jll]]
 deps = ["Artifacts", "Bzip2_jll", "FreeType2_jll", "FriBidi_jll", "HarfBuzz_jll", "JLLWrappers", "Libdl", "Zlib_jll"]
@@ -1972,9 +2036,9 @@ version = "1.28.1+0"
 
 [[deps.libpng_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Zlib_jll"]
-git-tree-sha1 = "6ab498eaf50e0495f89e7a5b582816e2efb95f64"
+git-tree-sha1 = "e51150d5ab85cee6fc36726850f0e627ad2e4aba"
 uuid = "b53b4c65-9356-5827-b1ea-8c7a1a84506f"
-version = "1.6.54+0"
+version = "1.6.58+0"
 
 [[deps.libva_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Xorg_libX11_jll", "Xorg_libXext_jll", "Xorg_libXfixes_jll", "libdrm_jll"]
@@ -1998,6 +2062,12 @@ version = "1.1.7+0"
 deps = ["Artifacts", "Libdl"]
 uuid = "8e850ede-7688-5339-a07c-302acd2aaf8d"
 version = "1.64.0+1"
+
+[[deps.oneTBB_jll]]
+deps = ["Artifacts", "JLLWrappers", "LazyArtifacts", "Libdl"]
+git-tree-sha1 = "1350188a69a6e46f799d3945beef36435ed7262f"
+uuid = "1317d2d5-d96f-522e-a858-c73665f53c3e"
+version = "2022.0.0+1"
 
 [[deps.p7zip_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
@@ -2024,49 +2094,56 @@ version = "1.13.0+0"
 """
 
 # ╔═╡ Cell order:
-# ╟─bcbc2212-ed6e-4f13-aaf9-ce590307f3e9
-# ╟─73d949f1-e2bd-48bd-ac66-bf80826352e8
-# ╟─dcbdb5fa-9339-420f-8a86-bb73c74ae150
-# ╠═602d62ba-1ad4-11f1-b313-5335bcd6b34f
-# ╟─ae67f298-ae74-45b7-b449-e56e4ae014fb
-# ╟─0d927fcb-8cbe-4d62-abdc-253c2f3366cc
-# ╠═bc61842e-0a3e-4982-be34-9a5cf33ba7a4
-# ╠═cdb53e74-a217-41a7-acf5-c9e6aba69c19
-# ╟─8aec1137-49d9-4137-9215-ef7a26658433
-# ╠═dc736a21-ed78-45bc-bdd8-cc0bd1671683
-# ╟─c1f138cf-d3a1-486b-ac63-42a9a7da591f
-# ╠═5eec540d-75ec-4e41-88a6-b79553738234
-# ╟─6c7b889e-e334-4ac4-9e1e-567e61dd683e
-# ╠═04e48ffc-645c-47e2-8a73-91a45ad18815
-# ╟─9160a9d6-f773-44b4-b95e-faa977b440e6
-# ╠═2b90a0ec-f3d0-49af-a8f4-00debca03a29
-# ╟─e1ad85b2-ac26-4220-a295-794aafa0aa5a
-# ╠═2cf396dc-2372-4549-b7a0-2c5754c1d031
-# ╟─2e8285fc-d077-4729-9737-9c54df8edf0e
-# ╠═593aaf0a-7a28-4ce6-9af3-5b54a9d29137
-# ╟─2fc64c35-4747-4e7b-8927-c907c0a4f9b3
-# ╠═4d875a9a-7e69-440d-8dd4-c4fb5af610e4
-# ╟─07e7eece-6ae8-48e0-82a8-b2edcfa3dc96
-# ╠═43ca32fd-655f-401f-ae5d-95e52d72533c
-# ╟─a0c4d56f-1963-43b2-bdc3-1b0c5f6c8c33
-# ╠═a56c4254-aece-4426-be0c-028261ec84d2
-# ╟─c74746fe-df38-46c3-9a3e-e1960315e05f
-# ╠═b3d34468-5aaf-4b47-92fc-5e074f98d863
-# ╟─5f0f2db3-b49d-4ddf-8e41-f560a5c033a3
-# ╠═5a301324-0d71-4585-9f1e-aa290742cdd9
-# ╟─50c58ab3-679b-404e-8bf4-7a7b1e067b4d
-# ╠═92e47581-3bc9-4201-bc4c-feb41abddb43
-# ╟─9a599802-62b2-466d-86d3-3644d784ab33
-# ╠═586aef48-0aa5-43c0-8ea2-d685a70d89a1
-# ╟─cfcc03c8-c380-4e3e-9842-2e47b3fb7d76
-# ╠═3dc07f43-d3cd-4faf-8015-140de519921f
-# ╟─58020ae8-7a3b-4a17-a7b1-3c33c59d6925
-# ╠═6feb4efa-fbef-4906-a758-3d71248f985c
-# ╠═af9cdf8f-3302-400f-9f62-45c5e8f18c09
-# ╠═9935b788-020f-46ad-b511-95b791ddb144
-# ╟─b382480b-ad71-489b-b712-a61ade7f47be
-# ╠═463716fd-75b1-4155-84e6-443e9b952153
-# ╟─26ccf701-3856-49f8-a3b6-5c7ccee79984
-# ╟─c8650f24-675c-4c3c-9e91-63de697bed70
+# ╠═94b5cf44-3f29-11f1-bda5-6bfd93d05d3e
+# ╟─7de066f5-57e0-4460-b893-b6a77fc6b83a
+# ╟─ae0a37e1-c6d8-4eb4-8aa5-2152091fa8c4
+# ╠═a8cdace1-ea5d-4c89-bc77-b1739f2d3c3e
+# ╟─fb4e35c1-411c-4491-91df-c09cfdca00ce
+# ╠═1bb2c7e5-491b-4277-b264-3405f15aa028
+# ╠═b8ff25e4-3d88-4519-9372-f3ae4debe614
+# ╠═5a390871-3058-44c0-b8fa-476edefcfa88
+# ╟─a753302b-de44-417c-a3dc-94640593cb3a
+# ╠═4a3dc170-8600-472d-b0ea-12e1c964d157
+# ╠═9df32e77-ddfe-45d5-99ea-27f87b76cc54
+# ╟─cf557b13-4c32-45ef-956c-59ddf57ba95e
+# ╠═56d00795-87bb-4a26-9a5f-368fc7e10fba
+# ╠═02f06167-fbc3-4f1b-b166-9cabf65cc9ff
+# ╟─d167fca0-7fc3-465d-a0ef-c27759f5e5c3
+# ╠═748044c5-83c0-4f8b-9fa0-76d1befc4a9c
+# ╠═3b9e43ad-3b2e-468f-9dbe-b4b204886da3
+# ╟─830bfbeb-9efa-4756-99af-f13975e03686
+# ╠═a9ed971a-88c6-4183-9725-230aefd8713c
+# ╟─ffcaabc6-3b12-4f55-a8c6-762f704d8a35
+# ╟─42580c19-5cbd-460d-a811-a3bebb90c61f
+# ╠═06e8d69d-d488-4544-907d-39f83b503517
+# ╠═7c6f7d16-1627-43ca-bd7f-5fe320ee322f
+# ╠═e41400d7-3f23-44a9-b791-bdf0a0a3e136
+# ╟─55f935b3-aeb8-4903-b985-11e2e5290d61
+# ╠═15e9ea06-c90d-48a1-8f05-47fba637d8e0
+# ╟─34d379d6-e2bb-4e1e-9578-8c1d5647f9b2
+# ╠═3fb58d11-9441-4340-9dd1-718258bfe41b
+# ╠═ca7236cf-892a-4b5c-a0c0-45def159d9d6
+# ╟─b670996a-3980-4915-8c29-db81a47d5191
+# ╠═c4429221-512f-49ae-baca-9e101970c2bc
+# ╠═c77d663e-55b9-416d-806a-8cf3b6aec45a
+# ╟─a53bb39e-1c5c-4c64-a6e0-b6d796c6fb71
+# ╠═42d72359-6363-4ebd-82c2-0e6b4bcb4a8e
+# ╠═6bdb1b5a-4631-43b8-ad2f-5f10f9e7a2bc
+# ╟─d454308a-9d9a-4603-945d-bcf07d5daeeb
+# ╠═f9c33963-f36c-4f7e-8265-84725aee8bdc
+# ╠═432ea1ce-6fa8-44c4-87ee-d8b5dbb1c4d3
+# ╟─e41150e9-09d9-431b-9616-820a7db670a3
+# ╠═7ca7122f-fa7b-4e65-a0e3-41cf1aef4bcf
+# ╟─dc5a39f5-3705-4afa-8815-37923fc8946e
+# ╟─cb10b302-b0b6-43f1-aeb3-cd333ae9224f
+# ╠═b4aeb830-df6b-4283-949b-6a2fcd2b242d
+# ╠═175fa203-79b8-42dc-aa43-14ba1caddedd
+# ╠═db0415d4-c71e-4b7f-9cb9-a09b4b000ec8
+# ╟─99d08560-f8ca-453e-90e0-1cf0643fa749
+# ╠═de1100a2-b786-4005-beb6-a58acb29dd93
+# ╠═ff96eca1-5545-48e7-883c-5cf0a72778ce
+# ╟─16d5ec18-eded-4747-ab48-822a14078d55
+# ╠═428e5dd8-8cb4-4a82-8bcb-9278ff489136
+# ╠═1284c9d2-4beb-4c98-becc-e069f60d8556
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
