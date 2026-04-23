@@ -14,7 +14,16 @@ begin
 	using LinearAlgebra
 	using Printf
 	using FFTW
+	using PlutoUI
 end
+
+# ╔═╡ 8f25ef21-b319-49c2-8c67-b6abaf91f99c
+html"""
+<h1 style="text-align:center;">Module 4 Part 2</h1>
+"""
+
+# ╔═╡ d5b38ccc-82b9-48a2-b260-c12944cb2407
+TableOfContents()
 
 # ╔═╡ 7de066f5-57e0-4460-b893-b6a77fc6b83a
 md"""
@@ -43,12 +52,15 @@ md"""
 """
 
 # ╔═╡ a8cdace1-ea5d-4c89-bc77-b1739f2d3c3e
-
 begin
-
 	@inline f(x::Float64, r::Float64) = x^2 * exp(r - x)
 	@inline df(x::Float64, r::Float64) = x * (2.0 - x) * exp(r - x)
 end
+
+# ╔═╡ 1b5a3dd7-d1f5-4cad-bda9-6a682506b7cf
+md"""
+# Exploring Local Dynamics
+"""
 
 # ╔═╡ fb4e35c1-411c-4491-91df-c09cfdca00ce
 md"""
@@ -148,8 +160,6 @@ function bifurcation_diagram(;
     return p
 end
 
-
-
 # ╔═╡ 9df32e77-ddfe-45d5-99ea-27f87b76cc54
 begin
 p_bif = bifurcation_diagram()
@@ -157,7 +167,7 @@ end
 
 # ╔═╡ cf557b13-4c32-45ef-956c-59ddf57ba95e
 md"""
-# Cobweb Diagram
+## Cobweb Diagram
 
 Long-term behavior of the system is studied using this
 """
@@ -188,9 +198,7 @@ function cobweb(r::Float64, x0::Float64; n::Int=80, xmax=nothing)
     title!("Cobweb  r = $r")
     return p
 end
-
 end
-
 
 # ╔═╡ 02f06167-fbc3-4f1b-b166-9cabf65cc9ff
 begin
@@ -241,7 +249,7 @@ end
 
 # ╔═╡ 830bfbeb-9efa-4756-99af-f13975e03686
 md"""
-## Coupled Map Lattice
+# Coupled Map Lattice
 """
 
 # ╔═╡ a9ed971a-88c6-4183-9725-230aefd8713c
@@ -268,7 +276,7 @@ end
 
 # ╔═╡ ffcaabc6-3b12-4f55-a8c6-762f704d8a35
 md"""
-### Spatiotemporal Plots
+## Spatiotemporal Plots
 """
 
 # ╔═╡ 42580c19-5cbd-460d-a811-a3bebb90c61f
@@ -334,8 +342,7 @@ Here I have plotted the synchronization error vs Coupling strength
 function sync_order_parameter(r::Float64, ε::Float64, N::Int, T::Int;
                                n_trans::Int=500)
     X = evolve_cml(r, ε, N, T + n_trans)
-    Xss = X[:, (n_trans+1):end]      # discard transient
-    # σ(n) = std of spatial snapshot at time n
+    Xss = X[:, (n_trans+1):end]    
     return mean(std(Xss[:, t]) for t in 1:T)
 end
 
@@ -574,64 +581,10 @@ savefig(p_st_net, "10_spatiotemporal_networks.png")
 p_st_net
 end
 
-# ╔═╡ dc5a39f5-3705-4afa-8815-37923fc8946e
-md"""
-## Power Spectrum Of Single Lattice
-"""
-
-# ╔═╡ cb10b302-b0b6-43f1-aeb3-cd333ae9224f
-md"""
-You can see that at r = 2.8, the spectrum becomes chatoic indicating chaos in the system
-"""
-
-# ╔═╡ b4aeb830-df6b-4283-949b-6a2fcd2b242d
-function power_spectrum(r::Float64; site=1, N=32, ε=0.05, T=8192, n_trans=2000)
-    X   = evolve_cml(r, ε, N, T + n_trans)
-    ts  = X[site, (n_trans+1):end]
-    ts .-= mean(ts)
-    spec = abs2.(fft(ts)) ./ length(ts)
-    freqs = (0:(length(ts)÷2)) ./ length(ts)
-    return freqs, spec[1:(length(ts)÷2+1)]
-end
-
-
-# ╔═╡ 175fa203-79b8-42dc-aa43-14ba1caddedd
-begin
-	
-r_psd_vals = [2.0, 2.5, 2.8]
-psd_panels = Plots.Plot[]
-for r_p in r_psd_vals
-    fs, ps = power_spectrum(r_p; T=4096)
-    push!(psd_panels,
-        plot(fs[2:end], log10.(ps[2:end] .+ 1e-20);
-            color=:purple, lw=0.8,
-            xlabel="Frequency", ylabel="log₁₀ PSD",
-            title="PSD  r = $r_p", legend=false))
-end
-p_psd = plot(psd_panels...; layout=(1,3), size=(1000,350))
-p_psd
-end
-
-# ╔═╡ db0415d4-c71e-4b7f-9cb9-a09b4b000ec8
-function spatial_correlation(X::Matrix{Float64}; max_lag=nothing)
-    N, T = size(X)
-    isnothing(max_lag) && (max_lag = N÷2)
-    C = zeros(max_lag)
-    for t in 1:T
-        xc = X[:, t] .- mean(X[:, t])
-        v  = var(X[:, t])
-        v < 1e-12 && continue
-        for d in 1:max_lag
-            C[d] += mean(xc[i]*xc[mod1(i+d, N)] for i in 1:N) / v
-        end
-    end
-    return C ./ T
-end
-
 # ╔═╡ 99d08560-f8ca-453e-90e0-1cf0643fa749
 md"""
 ## Attack On The Network
-Prior to the attack, the network maintains a state of collective chaotic synchronization. At t=300, the removal of the primary hub (Degree = 23) effectively increases the average path length of the system beyond the threshold where the coupling strength (ϵ=0.5) can maintain order. This leads to an immediate spatiotemporal collapse, characterized by a significant increase in the standard deviation (σ) and the disintegration of phase coherence across the lattice."
+The removal of the central hub at t=300 induces a permanent transition from a partially synchronized state to a regime of high-amplitude global disorder. The post-attack dynamics show that the network can no longer suppress the intrinsic chaos of the individual maps, resulting in a sharp, steady increase in the spatial standard deviation (σ). 
 """
 
 # ╔═╡ de1100a2-b786-4005-beb6-a58acb29dd93
@@ -695,9 +648,47 @@ annotate!(t_attack + 10, 0.1, Plots.text("Hub degree: $(degree(g_ba, the_hub))",
     plot(p_err, p_heat, layout=(2,1), size=(800, 700))
 end
 
+# ╔═╡ dc5a39f5-3705-4afa-8815-37923fc8946e
+md"""
+# Power Spectrum Of Single Lattice
+"""
+
+# ╔═╡ cb10b302-b0b6-43f1-aeb3-cd333ae9224f
+md"""
+You can see that at r = 2.8, the spectrum becomes chatoic indicating chaos in the system
+"""
+
+# ╔═╡ b4aeb830-df6b-4283-949b-6a2fcd2b242d
+function power_spectrum(r::Float64; site=1, N=32, ε=0.05, T=8192, n_trans=2000)
+    X   = evolve_cml(r, ε, N, T + n_trans)
+    ts  = X[site, (n_trans+1):end]
+    ts .-= mean(ts)
+    spec = abs2.(fft(ts)) ./ length(ts)
+    freqs = (0:(length(ts)÷2)) ./ length(ts)
+    return freqs, spec[1:(length(ts)÷2+1)]
+end
+
+
+# ╔═╡ 175fa203-79b8-42dc-aa43-14ba1caddedd
+begin
+	
+r_psd_vals = [2.0, 2.5, 2.8]
+psd_panels = Plots.Plot[]
+for r_p in r_psd_vals
+    fs, ps = power_spectrum(r_p; T=4096)
+    push!(psd_panels,
+        plot(fs[2:end], log10.(ps[2:end] .+ 1e-20);
+            color=:purple, lw=0.8,
+            xlabel="Frequency", ylabel="log₁₀ PSD",
+            title="PSD  r = $r_p", legend=false))
+end
+p_psd = plot(psd_panels...; layout=(1,3), size=(1000,350))
+p_psd
+end
+
 # ╔═╡ 16d5ec18-eded-4747-ab48-822a14078d55
 md"""
-## Search For Chimera Like States
+# Search For Chimera Like States
 The system exhibits a Chimera state, characterized by the spontaneous coexistence of synchronized and incoherent domains within an identical population of oscillators. This symmetry breaking is confirmed by the bimodal distribution of the local order parameter, which distinguishes the stable clusters from the chaotic regions.
 """
 
@@ -736,9 +727,6 @@ begin
 	p_chimera
 end
 
-# ╔═╡ 1284c9d2-4beb-4c98-becc-e069f60d8556
-
-
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
@@ -747,6 +735,7 @@ Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
 Karnak = "cd156443-31ad-4f6f-850f-a93ee5f75905"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
@@ -756,6 +745,7 @@ FFTW = "~1.10.0"
 Graphs = "~1.13.4"
 Karnak = "~1.2.0"
 Plots = "~1.41.6"
+PlutoUI = "~0.7.79"
 StatsBase = "~0.34.10"
 """
 
@@ -765,7 +755,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "4527eae56c8aaf9d82150b6a407f815d5be6d4d1"
+project_hash = "26b2fee020e7ed07a9ebf9fd8e49babf6d90db8e"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -780,6 +770,12 @@ version = "1.5.0"
     [deps.AbstractFFTs.weakdeps]
     ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
     Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[[deps.AbstractPlutoDingetjes]]
+deps = ["Pkg"]
+git-tree-sha1 = "6e1d2a35f2f90a4bc7c2ed98079b2ba09c35b83a"
+uuid = "6e696c72-6542-2067-7265-42206c756150"
+version = "1.3.2"
 
 [[deps.AliasTables]]
 deps = ["PtrArrays", "Random"]
@@ -1114,6 +1110,24 @@ git-tree-sha1 = "f923f9a774fcf3f5cb761bfa43aeadd689714813"
 uuid = "2e76f6c2-a576-52d4-95c1-20adfe4de566"
 version = "8.5.1+0"
 
+[[deps.Hyperscript]]
+deps = ["Test"]
+git-tree-sha1 = "179267cfa5e712760cd43dcae385d7ea90cc25a4"
+uuid = "47d2ed2b-36de-50cf-bf87-49c2cf4b8b91"
+version = "0.0.5"
+
+[[deps.HypertextLiteral]]
+deps = ["Tricks"]
+git-tree-sha1 = "d1a86724f81bcd184a38fd284ce183ec067d71a0"
+uuid = "ac1192a8-f4b3-4bfe-ba22-af5b92cd3ab2"
+version = "1.0.0"
+
+[[deps.IOCapture]]
+deps = ["Logging", "Random"]
+git-tree-sha1 = "0ee181ec08df7d7c911901ea38baf16f755114dc"
+uuid = "b5f81e59-6552-4d32-b1f0-c071b021bf89"
+version = "1.0.0"
+
 [[deps.Inflate]]
 git-tree-sha1 = "d1b1b796e47d94588b3757fe84fbf65a5ec4a80d"
 uuid = "d25df0c9-e2be-5dd7-82c8-3ad0b3e990b9"
@@ -1344,6 +1358,11 @@ version = "4.5.0"
     MathTeXEngine = "0a4f8689-d25c-4efe-a92b-7142dfc1aa53"
     Typstry = "f0ed7684-a786-439e-b1e3-3b82803b501e"
 
+[[deps.MIMEs]]
+git-tree-sha1 = "c64d943587f7187e751162b3b84445bbbd79f691"
+uuid = "6c6e2e6c-3030-632d-7369-2d6c69616d65"
+version = "1.1.0"
+
 [[deps.MKL_jll]]
 deps = ["Artifacts", "IntelOpenMP_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "oneTBB_jll"]
 git-tree-sha1 = "282cadc186e7b2ae0eeadbd7a4dffed4196ae2aa"
@@ -1512,6 +1531,12 @@ version = "1.41.6"
     IJulia = "7073ff75-c697-5162-941a-fcdaad2a7d2a"
     ImageInTerminal = "d8c32880-2388-543b-8c61-d9f865259254"
     Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+
+[[deps.PlutoUI]]
+deps = ["AbstractPlutoDingetjes", "Base64", "ColorTypes", "Dates", "Downloads", "FixedPointNumbers", "Hyperscript", "HypertextLiteral", "IOCapture", "InteractiveUtils", "Logging", "MIMEs", "Markdown", "Random", "Reexport", "URIs", "UUIDs"]
+git-tree-sha1 = "3ac7038a98ef6977d44adeadc73cc6f596c08109"
+uuid = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+version = "0.7.79"
 
 [[deps.PolygonAlgorithms]]
 git-tree-sha1 = "c1092ada65e6d59d6361d5086ddb0a5ea63ae204"
@@ -1764,6 +1789,11 @@ version = "1.11.0"
 git-tree-sha1 = "0c45878dcfdcfa8480052b6ab162cdd138781742"
 uuid = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
 version = "0.11.3"
+
+[[deps.Tricks]]
+git-tree-sha1 = "311349fd1c93a31f783f977a71e8b062a57d4101"
+uuid = "410a4b4d-49e4-4fbc-ab6d-cb71b17b3775"
+version = "0.1.13"
 
 [[deps.URIs]]
 git-tree-sha1 = "bef26fb046d031353ef97a82e3fdb6afe7f21b1a"
@@ -2094,10 +2124,13 @@ version = "1.13.0+0"
 """
 
 # ╔═╡ Cell order:
+# ╟─8f25ef21-b319-49c2-8c67-b6abaf91f99c
 # ╠═94b5cf44-3f29-11f1-bda5-6bfd93d05d3e
+# ╠═d5b38ccc-82b9-48a2-b260-c12944cb2407
 # ╟─7de066f5-57e0-4460-b893-b6a77fc6b83a
 # ╟─ae0a37e1-c6d8-4eb4-8aa5-2152091fa8c4
 # ╠═a8cdace1-ea5d-4c89-bc77-b1739f2d3c3e
+# ╟─1b5a3dd7-d1f5-4cad-bda9-6a682506b7cf
 # ╟─fb4e35c1-411c-4491-91df-c09cfdca00ce
 # ╠═1bb2c7e5-491b-4277-b264-3405f15aa028
 # ╠═b8ff25e4-3d88-4519-9372-f3ae4debe614
@@ -2134,16 +2167,14 @@ version = "1.13.0+0"
 # ╠═432ea1ce-6fa8-44c4-87ee-d8b5dbb1c4d3
 # ╟─e41150e9-09d9-431b-9616-820a7db670a3
 # ╠═7ca7122f-fa7b-4e65-a0e3-41cf1aef4bcf
+# ╟─99d08560-f8ca-453e-90e0-1cf0643fa749
+# ╠═de1100a2-b786-4005-beb6-a58acb29dd93
+# ╠═ff96eca1-5545-48e7-883c-5cf0a72778ce
 # ╟─dc5a39f5-3705-4afa-8815-37923fc8946e
 # ╟─cb10b302-b0b6-43f1-aeb3-cd333ae9224f
 # ╠═b4aeb830-df6b-4283-949b-6a2fcd2b242d
 # ╠═175fa203-79b8-42dc-aa43-14ba1caddedd
-# ╠═db0415d4-c71e-4b7f-9cb9-a09b4b000ec8
-# ╟─99d08560-f8ca-453e-90e0-1cf0643fa749
-# ╠═de1100a2-b786-4005-beb6-a58acb29dd93
-# ╠═ff96eca1-5545-48e7-883c-5cf0a72778ce
 # ╟─16d5ec18-eded-4747-ab48-822a14078d55
 # ╠═428e5dd8-8cb4-4a82-8bcb-9278ff489136
-# ╠═1284c9d2-4beb-4c98-becc-e069f60d8556
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
